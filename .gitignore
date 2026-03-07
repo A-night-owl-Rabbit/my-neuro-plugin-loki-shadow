@@ -1,0 +1,4 @@
+node_modules/
+test_run.js
+test_full.js
+*.log

@@ -1,0 +1,9 @@
+{
+  "name": "loki-shadow",
+  "displayName": "洛基之影",
+  "version": "1.0.0",
+  "author": "爱熬夜的人形兔",
+  "description": "游戏陪玩智能插件：自动检测当前游戏、搜索本地攻略库、从游民星空和B站下载攻略，通过DeepSeek下级智能体编排全流程，返回精准游戏攻略与剧情答案",
+  "main": "index.js",
+  "lang": "js"
+}
