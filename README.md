@@ -53,7 +53,7 @@
 ## 依赖
 
 - [my-neuro](https://github.com/A-night-owl-Rabbit/my-neuro) live-2d 插件系统
-- `bilibili_mcp.js` server-tool（B站功能需要）
+- [Bilibili MCP 工具集](https://github.com/A-night-owl-Rabbit/my-neuro-bilibili-mcp) server-tool（B站功能需要）
 - Node.js 包：`cheerio`、`axios`
 
 ## 作者
