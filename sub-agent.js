@@ -1,6 +1,7 @@
 /**
- * 洛基之影 - DeepSeek 下级智能体
- * 封装所有需要 LLM 推理的环节：文件选择、内容分析、答案生成、标签生成、综合整理
+ * 洛基之影 - 下级智能体（主 + 后备双Agent）
+ * 主Agent: DeepSeek  |  后备Agent: Qwen
+ * 主Agent 失败后自动切换后备Agent
  */
 
 const axios = require('axios');
@@ -8,47 +9,110 @@ const axios = require('axios');
 class SubAgent {
     /**
      * @param {object} config - sub_agent 配置段
-     * @param {string} config.api_url
-     * @param {string} config.api_key
-     * @param {string} config.model
-     * @param {number} [config.temperature]
-     * @param {number} [config.max_tokens]
+     * @param {object} [fallbackConfig] - fallback_agent 配置段
      */
-    constructor(config) {
-        this.apiUrl = config.api_url || 'https://api.siliconflow.cn/v1';
-        this.apiKey = config.api_key;
-        this.model = config.model || 'deepseek-ai/DeepSeek-V3.2';
-        this.temperature = config.temperature || 0.3;
-        this.maxTokens = config.max_tokens || 20000;
+    constructor(config, fallbackConfig = null) {
+        this.primary = {
+            apiUrl: config.api_url || 'https://api.siliconflow.cn/v1',
+            apiKey: config.api_key,
+            model: config.model || 'deepseek-ai/DeepSeek-V3.2',
+            temperature: config.temperature || 0.3,
+            maxTokens: config.max_tokens || 20000,
+            name: 'DeepSeek'
+        };
+
+        this.fallback = null;
+        if (fallbackConfig && fallbackConfig.api_key) {
+            this.fallback = {
+                apiUrl: fallbackConfig.api_url || 'https://api.siliconflow.cn/v1',
+                apiKey: fallbackConfig.api_key,
+                model: fallbackConfig.model || 'Qwen/Qwen3.5-397B-A17B',
+                temperature: fallbackConfig.temperature || 0.3,
+                maxTokens: fallbackConfig.max_tokens || 20000,
+                name: 'Qwen'
+            };
+        }
+
+        this._failCount = 0;
+        this._useFallback = false;
     }
 
+    /**
+     * 调用 LLM（带自动主/后备切换 + 重试）
+     */
     async _call(systemPrompt, userMessage, retries = 2) {
+        const agents = this._useFallback && this.fallback
+            ? [this.fallback, this.primary]
+            : this.fallback
+                ? [this.primary, this.fallback]
+                : [this.primary];
+
+        let lastError;
+        for (const agent of agents) {
+            try {
+                const result = await this._callAgent(agent, systemPrompt, userMessage, retries);
+                if (agent !== this.primary && this._useFallback) {
+                    console.log(`[洛基之影] 后备Agent ${agent.name} 成功响应`);
+                }
+                if (agent === this.primary) {
+                    this._failCount = Math.max(0, this._failCount - 1);
+                    this._useFallback = false;
+                }
+                return result;
+            } catch (err) {
+                lastError = err;
+                if (agent === this.primary) {
+                    this._failCount++;
+                    if (this._failCount >= 2) this._useFallback = true;
+                    console.log(`[洛基之影] 主Agent ${agent.name} 失败(连续${this._failCount}次), 尝试后备...`);
+                } else {
+                    console.log(`[洛基之影] 后备Agent ${agent.name} 也失败: ${err.message}`);
+                }
+            }
+        }
+        throw lastError;
+    }
+
+    /**
+     * 调用单个 Agent
+     */
+    async _callAgent(agent, systemPrompt, userMessage, retries) {
         for (let attempt = 0; attempt <= retries; attempt++) {
             try {
-                const resp = await axios.post(`${this.apiUrl}/chat/completions`, {
-                    model: this.model,
+                const resp = await axios.post(`${agent.apiUrl}/chat/completions`, {
+                    model: agent.model,
                     messages: [
                         { role: 'system', content: systemPrompt },
                         { role: 'user', content: userMessage }
                     ],
-                    temperature: this.temperature,
-                    max_tokens: this.maxTokens
+                    temperature: agent.temperature,
+                    max_tokens: agent.maxTokens
                 }, {
                     headers: {
-                        'Authorization': `Bearer ${this.apiKey}`,
+                        'Authorization': `Bearer ${agent.apiKey}`,
                         'Content-Type': 'application/json'
                     },
                     timeout: 120000
                 });
 
-                return resp.data.choices[0].message.content;
+                const content = resp.data.choices[0].message.content;
+                if (!content) throw new Error('LLM 返回空内容');
+                return content;
             } catch (err) {
                 if (attempt === retries) {
-                    throw new Error(`DeepSeek 调用失败 (已重试${retries}次): ${err.message}`);
+                    throw new Error(`${agent.name} 调用失败 (已重试${retries}次): ${err.message}`);
                 }
                 await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
             }
         }
+    }
+
+    /**
+     * 获取当前使用的 Agent 名称（用于日志）
+     */
+    getActiveAgentName() {
+        if (this._useFallback && this.fallback) return this.fallback.name;
+        return this.primary.name;
     }
 
     /**
@@ -155,29 +219,69 @@ class SubAgent {
     }
 
     /**
-     * 综合两个来源的内容，生成整合攻略
+     * 综合多个来源的内容，生成整合攻略
+     * @param {string} gameName
+     * @param {string} query
+     * @param {object} sources - { gamersky, bilibili, taptap, nga, miyoushe } 各来源文本（可为null）
      */
-    async combineAndSummarize(gameName, query, gamerskyContent, bilibiliSummary) {
+    async combineAndSummarize(gameName, query, sources) {
+        const sourceLabels = {
+            gamersky: '游民星空',
+            bilibili: 'B站视频',
+            taptap: 'TapTap',
+            nga: 'NGA论坛',
+            miyoushe: '米游社'
+        };
+
         const system = `你是一个游戏攻略整合专家。将来自不同来源的游戏信息进行综合整理。
 
 要求：
 1. 保留所有重要细节，不要遗漏
 2. 按逻辑组织内容，去除重复部分
-3. 标注信息来源（[游民星空] 或 [B站视频]）
+3. 标注信息来源
 4. 内容要详细具体，将所有内容进行完整转述
 5. 如有矛盾信息，同时保留并注明
 6. 输出格式清晰，分段分点`;
 
         let user = `游戏：${gameName}\n问题：${query}\n\n`;
-        if (gamerskyContent) {
-            user += `=== 来源1：游民星空 ===\n${gamerskyContent.substring(0, 10000)}\n\n`;
-        }
-        if (bilibiliSummary) {
-            user += `=== 来源2：B站视频 ===\n${bilibiliSummary.substring(0, 10000)}\n\n`;
-        }
-        user += '请综合整理以上信息：';
+        let sourceIndex = 1;
 
+        for (const [key, label] of Object.entries(sourceLabels)) {
+            const text = sources[key];
+            if (text) {
+                user += `=== 来源${sourceIndex}：${label} ===\n${text.substring(0, 8000)}\n\n`;
+                sourceIndex++;
+            }
+        }
+
+        if (sourceIndex === 1) {
+            throw new Error('没有任何来源内容可供整合');
+        }
+
+        user += '请综合整理以上信息：';
         return await this._call(system, user);
+    }
+
+    /**
+     * 从多平台搜索结果中选择最佳攻略帖
+     * @param {string} query
+     * @param {Array<{title: string, source: string}>} candidates
+     * @returns {Promise<number>} 序号 (1-based)
+     */
+    async selectBestGuide(query, candidates) {
+        const listStr = candidates.map((c, i) =>
+            `${i + 1}. [${c.source}] ${c.title}`
+        ).join('\n');
+
+        const system = `你是一个游戏攻略筛选助手。从多平台的攻略搜索结果中选择最适合回答用户问题的那篇。
+优先选择：标题与问题高度匹配的、来自知名攻略作者的、内容类型匹配的
+只返回序号（纯数字），如果都不合适返回 "0"`;
+
+        const user = `问题：${query}\n\n候选列表：\n${listStr}\n\n请返回最合适的序号：`;
+
+        const response = await this._call(system, user);
+        const num = parseInt(response.trim());
+        return isNaN(num) ? 0 : num;
     }
 }
 
