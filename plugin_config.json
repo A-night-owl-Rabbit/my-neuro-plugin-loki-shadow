@@ -1,11 +1,4 @@
 ﻿{
-  "enabled": {
-    "title": "启用插件",
-    "description": "是否启用洛基之影游戏陪玩系统",
-    "type": "bool",
-    "default": true,
-    "value": true
-  },
   "guide_library_path": {
     "title": "游戏攻略库路径",
     "description": "本地游戏攻略库的绝对路径，攻略文件将保存到此目录",
@@ -18,41 +11,11 @@
     "description": "负责攻略分析、内容整合、答案生成的主LLM",
     "type": "object",
     "fields": {
-      "api_key": {
-        "title": "API Key",
-        "description": "硅基流动 API Key",
-        "type": "string",
-        "default": "",
-        "value": ""
-      },
-      "api_url": {
-        "title": "API 地址",
-        "description": "硅基流动 API 基础地址",
-        "type": "string",
-        "default": "https://api.siliconflow.cn/v1",
-        "value": "https://api.siliconflow.cn/v1"
-      },
-      "model": {
-        "title": "模型名称",
-        "description": "主智能体使用的模型",
-        "type": "string",
-        "default": "deepseek-ai/DeepSeek-V3.2",
-        "value": "deepseek-ai/DeepSeek-V3.2"
-      },
-      "temperature": {
-        "title": "生成温度",
-        "description": "越低越精确，建议 0.2-0.5",
-        "type": "float",
-        "default": 0.3,
-        "value": 0.3
-      },
-      "max_tokens": {
-        "title": "最大Token数",
-        "description": "单次请求最大生成Token数",
-        "type": "int",
-        "default": 20000,
-        "value": 20000
-      }
+      "api_key": { "title": "API Key", "description": "硅基流动 API Key", "type": "string", "default": "", "value": "" },
+      "api_url": { "title": "API 地址", "description": "硅基流动 API 基础地址", "type": "string", "default": "https://api.siliconflow.cn/v1", "value": "https://api.siliconflow.cn/v1" },
+      "model": { "title": "模型名称", "description": "主智能体使用的模型", "type": "string", "default": "deepseek-ai/DeepSeek-V3.2", "value": "deepseek-ai/DeepSeek-V3.2" },
+      "temperature": { "title": "生成温度", "description": "越低越精确，建议 0.2-0.5", "type": "float", "default": 0.3, "value": 0.3 },
+      "max_tokens": { "title": "最大Token数", "description": "单次请求最大生成Token数", "type": "int", "default": 20000, "value": 20000 }
     }
   },
   "fallback_agent": {
@@ -60,83 +23,17 @@
     "description": "主Agent失败时自动切换的后备LLM，使用Qwen大模型",
     "type": "object",
     "fields": {
-      "api_key": {
-        "title": "API Key",
-        "description": "硅基流动 API Key（可与主Agent共用）",
-        "type": "string",
-        "default": "",
-        "value": ""
-      },
-      "api_url": {
-        "title": "API 地址",
-        "description": "硅基流动 API 基础地址",
-        "type": "string",
-        "default": "https://api.siliconflow.cn/v1",
-        "value": "https://api.siliconflow.cn/v1"
-      },
-      "model": {
-        "title": "模型名称",
-        "description": "后备智能体使用的模型",
-        "type": "string",
-        "default": "Qwen/Qwen3.5-397B-A17B",
-        "value": "Qwen/Qwen3.5-397B-A17B"
-      },
-      "temperature": {
-        "title": "生成温度",
-        "description": "越低越精确，建议 0.2-0.5",
-        "type": "float",
-        "default": 0.3,
-        "value": 0.3
-      },
-      "max_tokens": {
-        "title": "最大Token数",
-        "description": "单次请求最大生成Token数",
-        "type": "int",
-        "default": 20000,
-        "value": 20000
-      }
+      "api_key": { "title": "API Key", "description": "硅基流动 API Key（可与主Agent共用）", "type": "string", "default": "", "value": "" },
+      "api_url": { "title": "API 地址", "description": "硅基流动 API 基础地址", "type": "string", "default": "https://api.siliconflow.cn/v1", "value": "https://api.siliconflow.cn/v1" },
+      "model": { "title": "模型名称", "description": "后备智能体使用的模型", "type": "string", "default": "Qwen/Qwen3.5-397B-A17B", "value": "Qwen/Qwen3.5-397B-A17B" },
+      "temperature": { "title": "生成温度", "description": "越低越精确，建议 0.2-0.5", "type": "float", "default": 0.3, "value": 0.3 },
+      "max_tokens": { "title": "最大Token数", "description": "单次请求最大生成Token数", "type": "int", "default": 20000, "value": 20000 }
     }
   },
-  "gamersky_download_limit": {
-    "title": "游民星空下载数量",
-    "description": "每次从游民星空下载的攻略数量上限",
-    "type": "int",
-    "default": 1,
-    "value": 1
-  },
-  "bilibili_search_limit": {
-    "title": "B站搜索数量",
-    "description": "B站视频搜索返回的结果数量",
-    "type": "int",
-    "default": 3,
-    "value": 3
-  },
-  "taptap_search_limit": {
-    "title": "TapTap搜索数量",
-    "description": "TapTap攻略搜索返回的数量上限",
-    "type": "int",
-    "default": 1,
-    "value": 1
-  },
-  "nga_search_limit": {
-    "title": "NGA搜索数量",
-    "description": "NGA论坛攻略搜索返回的数量上限",
-    "type": "int",
-    "default": 1,
-    "value": 1
-  },
-  "miyoushe_search_limit": {
-    "title": "米游社搜索数量",
-    "description": "米游社攻略搜索返回的数量上限（仅米哈游系游戏有效）",
-    "type": "int",
-    "default": 1,
-    "value": 1
-  },
-  "max_content_length": {
-    "title": "内容最大长度",
-    "description": "发送给智能体的单个文档最大字符数，防止token超限",
-    "type": "int",
-    "default": 20000,
-    "value": 20000
-  }
+  "gamersky_download_limit": { "title": "游民星空下载数量", "description": "每次从游民星空下载的攻略数量上限", "type": "int", "default": 1, "value": 1 },
+  "bilibili_search_limit": { "title": "B站搜索数量", "description": "B站视频搜索返回的结果数量", "type": "int", "default": 3, "value": 3 },
+  "taptap_search_limit": { "title": "TapTap搜索数量", "description": "TapTap攻略搜索返回的数量上限", "type": "int", "default": 1, "value": 1 },
+  "nga_search_limit": { "title": "NGA搜索数量", "description": "NGA论坛攻略搜索返回的数量上限", "type": "int", "default": 1, "value": 1 },
+  "miyoushe_search_limit": { "title": "米游社搜索数量", "description": "米游社攻略搜索返回的数量上限（仅米哈游系游戏有效）", "type": "int", "default": 1, "value": 1 },
+  "max_content_length": { "title": "内容最大长度", "description": "发送给智能体的单个文档最大字符数，防止token超限", "type": "int", "default": 20000, "value": 20000 }
 }
