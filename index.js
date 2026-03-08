@@ -35,18 +35,16 @@ class LokiShadowPlugin extends Plugin {
 
     async onStart() {
         this._loadConfig();
-        if (this._config && this._config.enabled) {
+        if (this._config) {
             const agentInfo = this._config.fallback_agent?.api_key
                 ? `主Agent: DeepSeek, 后备: Qwen`
                 : `Agent: DeepSeek (无后备)`;
             logToTerminal('info', `${TAG} 插件已启动 | 攻略库: ${this._config.guide_library_path} | ${agentInfo}`);
-        } else {
-            logToTerminal('warn', `${TAG} 插件已加载但未启用`);
         }
     }
 
     async onLLMRequest(request) {
-        if (!this._config || !this._config.enabled) return;
+        if (!this._config) return;
 
         const sysMsg = request.messages.find(m => m.role === 'system');
         if (!sysMsg) return;
@@ -90,7 +88,7 @@ class LokiShadowPlugin extends Plugin {
     }
 
     getTools() {
-        if (!this._config || !this._config.enabled) return [];
+        if (!this._config) return [];
 
         return [{
             type: 'function',
@@ -132,7 +130,6 @@ class LokiShadowPlugin extends Plugin {
 
     _loadConfig() {
         const defaults = {
-            enabled: true,
             guide_library_path: 'K:\\neruo\\my-neuro-main\\肥牛的秘密基地\\游戏攻略库',
             sub_agent: {
                 api_key: '',
@@ -162,7 +159,6 @@ class LokiShadowPlugin extends Plugin {
             const fallbackAgent = rawCfg.fallback_agent || {};
 
             this._config = {
-                enabled: rawCfg.enabled !== undefined ? rawCfg.enabled : defaults.enabled,
                 guide_library_path: rawCfg.guide_library_path || defaults.guide_library_path,
                 sub_agent: {
                     api_key: subAgent.api_key || defaults.sub_agent.api_key,
