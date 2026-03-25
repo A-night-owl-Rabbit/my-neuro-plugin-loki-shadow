@@ -81,4 +81,5 @@
 
 ## 作者
 
-爱熬夜的人形兔本项目采用 Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) 许可证。
+爱熬夜的人形兔
+本项目采用 Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) 许可证。
