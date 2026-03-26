@@ -45,45 +45,111 @@ function getBilibiliModule() {
 }
 
 /**
- * 搜索B站视频
- * @param {string} keyword - 搜索关键词
- * @param {number} limit - 返回数量
- * @returns {Promise<Array<{title: string, author: string, bvid: string, play: number, duration: string, description: string}>>}
+ * 多语义并发搜索：将 query 按空格拆分为独立关键词，
+ * 每个关键词与 gameName 组合后并发搜索 B站，合并去重全部结果。
+ * gameName 作为受保护的核心，始终出现在每组搜索词中。
  */
-async function searchVideo(keyword, limit = 3) {
-    let rawResult;
+function _buildSearchQueries(gameName, query) {
+    const keywords = query.split(/\s+/).filter(k => k.length > 0);
+    const queries = [];
 
-    // 优先通过 localToolManager
+    for (const kw of keywords) {
+        const q = `${gameName} ${kw}`.trim();
+        if (!queries.includes(q)) queries.push(q);
+    }
+
+    const full = `${gameName} ${query}`.trim();
+    if (!queries.includes(full)) queries.push(full);
+
+    if (!queries.includes(gameName)) queries.push(gameName);
+
+    return queries;
+}
+
+/**
+ * 尝试从搜索结果中解析出视频列表
+ * @returns {Array|null} 视频列表，无法解析时返回 null
+ */
+function _parseSearchResult(rawResult) {
+    if (!rawResult || rawResult === 'null' || rawResult === 'undefined') return null;
+
+    try {
+        const parsed = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult;
+        if (!parsed || typeof parsed !== 'object') return null;
+        if (parsed.videos && Array.isArray(parsed.videos)) return parsed.videos;
+        if (Array.isArray(parsed)) return parsed.length > 0 ? parsed : null;
+        if (parsed.result && Array.isArray(parsed.result)) return parsed.result;
+    } catch {}
+
+    return null;
+}
+
+async function _doSearch(keyword, limit) {
+    let videos = null;
+
     if (global.localToolManager && global.localToolManager.isEnabled) {
         try {
             const toolCall = makeToolCall('search_bilibili_video', { keyword, limit });
             const result = await global.localToolManager.handleToolCalls([toolCall]);
-            rawResult = extractContent(result);
-        } catch {}
+            const rawResult = extractContent(result);
+            videos = _parseSearchResult(rawResult);
+            if (!videos && rawResult) {
+                console.log(`[洛基之影·B站] localToolManager 返回无法解析: ${String(rawResult).substring(0, 120)}`);
+            }
+        } catch (err) {
+            console.log(`[洛基之影·B站] localToolManager 调用异常: ${err.message}`);
+        }
     }
 
-    // 降级直接调用模块
-    if (!rawResult) {
+    if (!videos) {
         const mod = getBilibiliModule();
         if (mod) {
-            rawResult = await mod.executeFunction('search_bilibili_video', { keyword, limit });
+            try {
+                const rawResult = await mod.executeFunction('search_bilibili_video', { keyword, limit });
+                videos = _parseSearchResult(rawResult);
+                if (!videos && rawResult) {
+                    console.log(`[洛基之影·B站] 直接模块调用返回无法解析: ${String(rawResult).substring(0, 120)}`);
+                }
+            } catch (err) {
+                console.log(`[洛基之影·B站] 直接模块调用异常: ${err.message}`);
+            }
         }
     }
 
-    if (!rawResult) {
-        throw new Error('B站搜索不可用：localToolManager 和直接模块加载均失败');
+    return videos || [];
+}
+
+/**
+ * 搜索B站视频（多语义并发搜索 + 合并去重）
+ * 将 query 拆分为独立关键词，每个与 gameName 组合后并发搜索，
+ * 合并所有结果按 bvid 去重，返回完整候选池供 Sub-Agent 选择。
+ *
+ * @param {string} gameName - 核心主题名（受保护）
+ * @param {string} query - 搜索问题
+ * @param {number} limit - 每组搜索的返回数量
+ * @returns {Promise<Array>}
+ */
+async function searchVideo(gameName, query, limit = 3) {
+    const searchQueries = _buildSearchQueries(gameName, query);
+
+    console.log(`[洛基之影·B站] 多语义并发搜索，共 ${searchQueries.length} 组: ${searchQueries.map(q => `"${q}"`).join(', ')}`);
+
+    const searchPromises = searchQueries.map(q => _doSearch(q, limit));
+    const allResults = await Promise.all(searchPromises);
+
+    const seen = new Set();
+    const merged = [];
+    for (let i = 0; i < allResults.length; i++) {
+        for (const video of allResults[i]) {
+            if (video.bvid && !seen.has(video.bvid)) {
+                seen.add(video.bvid);
+                merged.push(video);
+            }
+        }
     }
 
-    // 解析结果
-    try {
-        const parsed = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult;
-        if (parsed.videos && Array.isArray(parsed.videos)) {
-            return parsed.videos;
-        }
-        if (Array.isArray(parsed)) return parsed;
-    } catch {}
-
-    return [];
+    console.log(`[洛基之影·B站] 合并去重后共 ${merged.length} 条候选视频`);
+    return merged;
 }
 
 /**

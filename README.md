@@ -1,85 +1,223 @@
-﻿# 洛基之影 (Shadow of Loki)
+# 洛基之影（Shadow of Loki）
 
-[my-neuro](https://github.com/morettt/my-neuro) live-2d 游戏陪玩智能插件 v2.0。自动检测当前游戏、搜索本地攻略库，从 **5 个来源并行下载** 攻略，通过 DeepSeek 主 Agent + Qwen 后备 Agent 编排全流程，返回精准游戏攻略与剧情答案。
+[`my-neuro`](https://github.com/morettt/my-neuro) 的 [`live-2d`](https://github.com/morettt/my-neuro) 社区插件，面向“游戏陪玩 / 游戏攻略辅助”场景设计。
 
-**主对话模型集成**：通过 `onLLMRequest` 钩子自动注入游戏陪玩行为协议，主模型可根据截图画面分析游戏状态，智能提问并防剧透式引导用户。
+它会在对话过程中配合主模型识别游戏上下文，记录当前任务、区域、Boss、章节与角色状态，并在需要时从本地攻略库与多平台来源中检索、整合信息，给出更贴近当前进度的辅助回答。
 
-## 特性
+> 当前仓库为公开发布版：已移除本地私有路径、API Key、个人隐私信息，以及不适合公开分发的敏感提示内容。
 
-- 🎮 **自动游戏检测** - 通过 PowerShell 窗口进程识别当前游戏
-- 📚 **本地攻略库缓存** - 基于语义标签快速检索，避免重复下载
-- 🌐 **5 源并行下载** - 游民星空 / B站 / TapTap / NGA / 米游社
-- 🤖 **双 Agent 容灾** - DeepSeek 主力 + Qwen 后备，自动切换
-- 🔄 **指数退避重试** - 所有网络请求与 LLM 调用支持自动重试
-- 🛡️ **防剧透协议** - 注入主模型的行为指令，像朋友一样引导而不是念攻略
-- 📸 **截图联动** - 主模型分析游戏截图后自动调用洛基之影获取信息
+## 功能概览
 
-## 快速开始
+- **游戏状态追踪**：通过 [`loki_shadow_track`](./index.js) 记录任务、地图、Boss、章节、角色等上下文信息。
+- **攻略/剧情查询**：通过 [`loki_shadow_query`](./index.js) 查询当前游戏相关攻略、剧情、配装、Boss 打法等内容。
+- **五源并行检索**：支持游民星空、B 站、TapTap、NGA、米游社等来源并行获取信息。
+- **本地攻略库缓存**：优先搜索本地攻略库，降低重复抓取和重复整理成本。
+- **双模型容灾**：支持主 Agent 与后备 Agent 切换。
+- **会话增强搜索**：结合近期游戏状态，自动优化低质量查询词。
+- **防剧透式辅助**：适合做“陪玩型”辅助，而不是简单硬贴原文攻略。
 
-1. 将本仓库克隆到 `live-2d/plugins/community/loki-shadow/` 目录
-2. 在插件配置页面设置 **API Key** 和 **游戏攻略库路径**
-3. 确保已安装依赖：`cheerio`、`axios`（在 live-2d 目录执行 `npm install cheerio axios`）
-4. 启用插件即可
+## 适用场景
 
-## 配置说明
-
-| 配置项 | 说明 |
-|--------|------|
-| 游戏攻略库路径 | 本地攻略文件保存目录的绝对路径 |
-| 主智能体 (DeepSeek) | API Key / 地址 / 模型 / 温度 / Token 上限 |
-| 后备智能体 (Qwen) | API Key / 地址 / 模型 / 温度 / Token 上限（主 Agent 失败时自动切换） |
-| 游民星空下载数量 | 每次下载的攻略数量上限 |
-| B站搜索数量 | B站视频搜索返回的结果数量 |
-| TapTap搜索数量 | TapTap 攻略搜索返回的数量上限 |
-| NGA搜索数量 | NGA 论坛攻略搜索返回的数量上限 |
-| 米游社搜索数量 | 米游社攻略搜索返回的数量上限（仅米哈游系游戏有效） |
-| 内容最大长度 | 单个文档最大字符数，防止 token 超限 |
+- 用户正在游玩单机 / 二游 / 剧情游戏时，结合截图或聊天内容进行辅助。
+- 用户卡关，希望获得**不过度剧透**的分步引导。
+- 用户想讨论当前章节、任务、Boss 或角色，但不希望被未来剧情直接剧透。
+- 用户需要将零碎截图信息转成结构化搜索词进行攻略查询。
 
 ## 工作流程
 
-对外只暴露一个工具 `loki_shadow_query`，内部由下级智能体编排 7 个步骤：
+插件核心流程由 [`orchestrator.js`](./orchestrator.js) 编排，大致如下：
 
-1. **游戏检测** — 通过 PowerShell 检测窗口进程识别当前游戏
-2. **攻略库检索** — 在攻略库中按标签和文件名进行匹配搜索
-3. **内容分析** — Agent 判断现有攻略是否能回答问题
-4. **信息下载** — 不足时从 5 个来源异步并行获取新攻略
-5. **内容整合** — Agent 综合多源信息，生成带语义标签的攻略文件保存到库中
-6. **生成答案** — Agent 生成精准详细的最终答案
-7. **返回结果** — 将答案返回给主对话模型
+1. 检测当前游戏（或使用显式传入的游戏名）
+2. 扫描本地攻略库
+3. 分析已有内容是否足够回答
+4. 必要时从多来源并行抓取补充资料
+5. 整合结果并生成可复用攻略内容
+6. 结合当前会话状态生成最终回答
 
-### 主模型行为协议
-
-插件通过 `onLLMRequest` 自动向主对话模型注入游戏陪玩行为协议：
-- **截图分析**：识别游戏画面 → 分析场景 → 转化为问题 → 调用工具
-- **防剧透引导**：不直接复述攻略，分步给提示，像通关好友一样聊天
-- **多种互动**：攻略引导 / 剧情讨论 / 角色聊天 / 主动评论画面
-
-## 文件结构
+## 仓库结构
 
 | 文件 | 说明 |
-|------|------|
-| `index.js` | 插件入口，工具注册，系统提示词注入 |
-| `orchestrator.js` | 核心工作流引擎，7 步编排 |
-| `sub-agent.js` | 双 LLM 封装（DeepSeek + Qwen 容灾） |
-| `retry-utils.js` | 通用重试工具（指数退避） |
-| `window-detector.js` | PowerShell 窗口进程检测 |
-| `guide-library.js` | 本地攻略库管理 |
-| `gamersky-crawler.js` | 游民星空爬虫 |
-| `bilibili-fetcher.js` | B站视频搜索与总结 |
-| `taptap-crawler.js` | TapTap 攻略爬虫 |
-| `nga-crawler.js` | NGA 论坛爬虫 |
-| `miyoushe-crawler.js` | 米游社攻略爬虫 |
-| `logger.js` | 结构化日志系统 |
-| `metadata.json` | 插件元数据 |
-| `plugin_config.json` | 配置项定义 |
+| --- | --- |
+| [`index.js`](./index.js) | 插件入口、工具注册、主流程接入 |
+| [`orchestrator.js`](./orchestrator.js) | 核心工作流编排 |
+| [`session-context.js`](./session-context.js) | 游戏会话状态管理 |
+| [`sub-agent.js`](./sub-agent.js) | LLM 调用与主/后备切换 |
+| [`guide-library.js`](./guide-library.js) | 本地攻略库扫描、读取、保存、去重 |
+| [`window-detector.js`](./window-detector.js) | Windows 游戏窗口检测 |
+| [`gamersky-crawler.js`](./gamersky-crawler.js) | 游民星空内容抓取 |
+| [`bilibili-fetcher.js`](./bilibili-fetcher.js) | B 站搜索与摘要 |
+| [`taptap-crawler.js`](./taptap-crawler.js) | TapTap 内容抓取 |
+| [`nga-crawler.js`](./nga-crawler.js) | NGA 内容抓取 |
+| [`miyoushe-crawler.js`](./miyoushe-crawler.js) | 米游社内容抓取 |
+| [`retry-utils.js`](./retry-utils.js) | 通用重试工具 |
+| [`logger.js`](./logger.js) | 结构化日志输出 |
+| [`metadata.json`](./metadata.json) | 插件元数据 |
+| [`plugin_config.json`](./plugin_config.json) | 插件配置定义 |
 
-## 依赖
+## 安装方式
 
-- [my-neuro](https://github.com/morettt/my-neuro) live-2d 插件系统
-- [Bilibili MCP 工具集](https://github.com/A-night-owl-Rabbit/my-neuro-bilibili-mcp) server-tool（B站数据源依赖）
-- Node.js 模块：`cheerio`、`axios`
+将本仓库放入：
 
-## 作者
+```text
+live-2d/plugins/community/loki-shadow/
+```
 
-爱熬夜的人形兔
-本项目采用 Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) 许可证。
+然后在 `live-2d` 运行依赖安装：
+
+```bash
+npm install axios cheerio
+```
+
+如果你的运行环境已经包含这些依赖，可跳过。
+
+## 配置说明
+
+公开版已将敏感配置清空。你需要在插件配置界面自行填写。
+
+### 主要配置项
+
+- **游戏攻略库路径**：默认使用相对目录 [`./game-guides`](./plugin_config.json)
+- **主智能体配置**：API 地址、模型、温度、最大 Token
+- **后备智能体配置**：主模型失败时自动切换
+- **各来源搜索数量限制**：用于控制抓取规模
+- **内容最大长度**：避免发送给模型的文本过长
+
+### 配置建议
+
+- `guide_library_path`：建议改为你本地实际可写目录
+- `sub_agent.api_key`：填写主模型 API Key
+- `fallback_agent.api_key`：可选，填写后备模型 API Key
+- `max_content_length`：根据你的模型上下文能力酌情调整
+
+## 工具说明
+
+### `loki_shadow_track`
+
+用于记录当前观察到的游戏状态，例如：
+
+- 游戏名
+- 当前任务
+- 当前 Boss
+- 当前区域
+- 当前章节
+- 相关角色列表
+
+这个工具不会直接搜索攻略，但会增强后续查询质量。
+
+### `loki_shadow_query`
+
+用于发起正式查询，例如：
+
+- `原神 无相之雷 打法攻略`
+- `鸣潮 第三章 主线任务流程`
+- `绝区零 某角色 配队思路`
+
+建议使用**结构化关键词**，效果会明显好于零碎截图原文。
+
+## 更新说明（公开版）
+
+本次公开仓库更新重点包括：
+
+- 同步最新插件代码结构
+- 增加 [`session-context.js`](./session-context.js) 会话状态追踪支持
+- 完整接入状态追踪与查询联动逻辑
+- 保留多来源并行检索与双 Agent 容灾能力
+- 清除仓库中的敏感信息与本地私有配置
+- 重写中文说明文档，便于直接开源发布
+
+## 隐私与安全说明
+
+本仓库**不会**包含以下内容：
+
+- 你的私有 API Key
+- 你的本地绝对路径配置
+- 个人隐私文件
+- 不适合公开的 AI 提示词 / 私有系统词
+- 本地攻略库实际内容
+
+如需使用，请在你自己的环境中自行配置。
+
+## 依赖与环境
+
+- Node.js
+- `axios`
+- `cheerio`
+- Windows 环境下的 PowerShell（用于窗口检测能力）
+
+## 致谢
+
+- [`my-neuro`](https://github.com/morettt/my-neuro)
+- 各游戏社区公开内容来源
+
+## 许可证
+
+本项目采用 **CC BY-NC-SA 4.0** 许可证。
+- `guide_library_path`：建议改为你本地实际可写目录
+- `sub_agent.api_key`：填写主模型 API Key
+- `fallback_agent.api_key`：可选，填写后备模型 API Key
+- `max_content_length`：根据你的模型上下文能力酌情调整
+
+## 工具说明
+
+### `loki_shadow_track`
+
+用于记录当前观察到的游戏状态，例如：
+
+- 游戏名
+- 当前任务
+- 当前 Boss
+- 当前区域
+- 当前章节
+- 相关角色列表
+
+这个工具不会直接搜索攻略，但会增强后续查询质量。
+
+### `loki_shadow_query`
+
+用于发起正式查询，例如：
+
+- `原神 无相之雷 打法攻略`
+- `鸣潮 第三章 主线任务流程`
+- `绝区零 某角色 配队思路`
+
+建议使用**结构化关键词**，效果会明显好于零碎截图原文。
+
+## 更新说明（公开版）
+
+本次公开仓库更新重点包括：
+
+- 同步最新插件代码结构
+- 增加 [`session-context.js`](./session-context.js) 会话状态追踪支持
+- 完整接入状态追踪与查询联动逻辑
+- 保留多来源并行检索与双 Agent 容灾能力
+- 清除仓库中的敏感信息与本地私有配置
+- 重写中文说明文档，便于直接开源发布
+
+## 隐私与安全说明
+
+本仓库**不会**包含以下内容：
+
+- 你的私有 API Key
+- 你的本地绝对路径配置
+- 个人隐私文件
+- 不适合公开的 AI 提示词 / 私有系统词
+- 本地攻略库实际内容
+
+如需使用，请在你自己的环境中自行配置。
+
+## 依赖与环境
+
+- Node.js
+- `axios`
+- `cheerio`
+- Windows 环境下的 PowerShell（用于窗口检测能力）
+
+## 致谢
+
+- [`my-neuro`](https://github.com/morettt/my-neuro)
+- 各游戏社区公开内容来源
+
+## 许可证
+
+本项目采用 **CC BY-NC-SA 4.0** 许可证。
+

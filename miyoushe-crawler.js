@@ -135,7 +135,13 @@ function parseQuillDelta(json) {
     } catch {
         return '';
     }
-    if (!Array.isArray(ops)) return '';
+    if (!Array.isArray(ops)) {
+        if (ops && Array.isArray(ops.ops)) {
+            ops = ops.ops;
+        } else {
+            return '';
+        }
+    }
 
     let text = '';
     for (const op of ops) {
@@ -167,59 +173,78 @@ function parseHtmlContent(html) {
 }
 
 /**
- * 米游社攻略搜索主入口
+ * 通过米游社搜索API检索帖子
+ * @returns {Array<{post_id, title, views, likes, view_type}>}
+ */
+async function searchPostsByKeyword(gids, keyword, size = 10) {
+    const url = `https://bbs-api.miyoushe.com/post/wapi/searchPosts?gids=${gids}&keyword=${encodeURIComponent(keyword)}&size=${size}`;
+    const data = await miyousheGet(url);
+
+    return (data?.posts || []).map(item => {
+        const post = item.post || {};
+        const stat = item.stat || {};
+        return {
+            post_id: post.post_id,
+            title: post.subject || '',
+            views: stat.view_num || 0,
+            likes: stat.like_num || 0,
+            view_type: post.view_type || 0
+        };
+    }).filter(p => p.post_id);
+}
+
+/**
+ * 米游社攻略搜索主入口（优先搜索API，降级论坛浏览）
  */
 async function searchMiyousheGuides(gameName, query, limit = 1) {
     const gameConfig = resolveGame(gameName);
     if (!gameConfig) return [];
 
-    let allPosts = [];
+    let candidatePosts = [];
 
-    // 并行获取精华帖、最新帖和推荐帖，增大覆盖面
-    const [goodResult, normalResult, recResult] = await Promise.allSettled([
-        getForumPosts(gameConfig.forum_id, gameConfig.gids, true, 30),
-        getForumPosts(gameConfig.forum_id, gameConfig.gids, false, 30),
-        getRecommendedPosts(gameConfig.gids, 20)
-    ]);
-
-    if (goodResult.status === 'fulfilled') allPosts.push(...goodResult.value);
-    if (normalResult.status === 'fulfilled') allPosts.push(...normalResult.value);
-    if (recResult.status === 'fulfilled') allPosts.push(...recResult.value);
-
-    if (allPosts.length === 0) return [];
-
-    // 去重
-    const seen = new Set();
-    allPosts = allPosts.filter(p => {
-        if (seen.has(p.post_id)) return false;
-        seen.add(p.post_id);
-        return true;
-    });
-
-    // 按标题关键词评分，优先文字类帖子 (view_type=1)
-    const queryLower = query.toLowerCase();
-    const keywords = queryLower.split(/[\s,，。、]+/).filter(k => k.length >= 2);
-
-    const scored = allPosts.map(p => {
-        const titleLower = (p.title || '').toLowerCase();
-        const matchCount = keywords.filter(k => titleLower.includes(k)).length;
-        const typeBonus = (p.view_type === 1) ? 0.5 : 0;
-        const viewBonus = Math.min(p.views / 10000, 1);
-        return { ...p, score: matchCount + typeBonus + viewBonus };
-    });
-    scored.sort((a, b) => b.score - a.score);
-
-    // 优先取标题匹配的，其次取热度高的文字帖
-    let bestPosts = scored.filter(p => p.score >= 1).slice(0, limit + 2);
-    if (bestPosts.length === 0) {
-        bestPosts = scored.filter(p => p.view_type === 1).slice(0, limit + 2);
+    try {
+        candidatePosts = await searchPostsByKeyword(gameConfig.gids, query, limit + 5);
+        if (candidatePosts.length === 0) {
+            candidatePosts = await searchPostsByKeyword(gameConfig.gids, `${gameName} ${query}`, limit + 5);
+        }
+    } catch (err) {
+        console.log(`[米游社] 搜索API失败(${err.message})，降级为论坛浏览`);
     }
-    if (bestPosts.length === 0 && scored.length > 0) {
-        bestPosts = scored.slice(0, limit + 2);
+
+    if (candidatePosts.length === 0) {
+        const [goodResult, normalResult] = await Promise.allSettled([
+            getForumPosts(gameConfig.forum_id, gameConfig.gids, true, 30),
+            getForumPosts(gameConfig.forum_id, gameConfig.gids, false, 30),
+        ]);
+
+        let allPosts = [];
+        if (goodResult.status === 'fulfilled') allPosts.push(...goodResult.value);
+        if (normalResult.status === 'fulfilled') allPosts.push(...normalResult.value);
+
+        const seen = new Set();
+        allPosts = allPosts.filter(p => {
+            if (seen.has(p.post_id)) return false;
+            seen.add(p.post_id);
+            return true;
+        });
+
+        const keywords = query.toLowerCase().split(/[\s,，。、]+/).filter(k => k.length >= 2);
+        const scored = allPosts.map(p => {
+            const titleLower = (p.title || '').toLowerCase();
+            const matchCount = keywords.filter(k => titleLower.includes(k)).length;
+            const typeBonus = (p.view_type === 1) ? 0.5 : 0;
+            return { ...p, score: matchCount + typeBonus };
+        });
+        scored.sort((a, b) => b.score - a.score);
+
+        candidatePosts = scored.filter(p => p.score >= 1).slice(0, limit + 2);
+        if (candidatePosts.length === 0) {
+            candidatePosts = scored.filter(p => p.view_type === 1).slice(0, limit + 2);
+        }
     }
 
     const results = [];
-    for (const post of bestPosts) {
+    for (const post of candidatePosts) {
         try {
             const detail = await getPostContent(post.post_id, gameConfig.prefix);
             if (detail.content && detail.content.length > 20) {

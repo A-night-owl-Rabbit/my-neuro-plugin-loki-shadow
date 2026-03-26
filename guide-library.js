@@ -12,6 +12,8 @@ class GuideLibrary {
      */
     constructor(libraryPath) {
         this.libraryPath = libraryPath;
+        this._sourceIndex = null;
+        this._sourceIndexTime = 0;
     }
 
     /**
@@ -88,7 +90,7 @@ class GuideLibrary {
     }
 
     /**
-     * 读取攻略文件内容
+     * 读取攻略文件内容（自动剥离洛基之影生成的元数据头部和尾部）
      * @param {string} fullPath - 文件完整路径
      * @param {number} [maxLength] - 最大读取长度
      * @returns {string|null}
@@ -96,6 +98,7 @@ class GuideLibrary {
     readFile(fullPath, maxLength = 0) {
         try {
             let content = fs.readFileSync(fullPath, 'utf-8');
+            content = this._stripMetadata(content);
             if (maxLength > 0 && content.length > maxLength) {
                 content = content.substring(0, maxLength) + '\n...(内容已截断)';
             }
@@ -106,26 +109,80 @@ class GuideLibrary {
     }
 
     /**
-     * 检查是否已存在相同来源的攻略
-     * 在文件头部搜索 "来源URL" 或 "来源" 字段
-     * @param {string} sourceUrl - 来源URL
+     * 剥离洛基之影自动生成的元数据头部和尾部，只保留纯攻略内容
+     */
+    _stripMetadata(content) {
+        const headerEnd = '===========================';
+        const headerIdx = content.indexOf(headerEnd);
+        if (headerIdx !== -1) {
+            content = content.substring(headerIdx + headerEnd.length).trimStart();
+        }
+
+        const footerMarker = '\n---\n此文件由 洛基之影 插件自动生成';
+        const footerIdx = content.lastIndexOf(footerMarker);
+        if (footerIdx !== -1) {
+            content = content.substring(0, footerIdx).trimEnd();
+        }
+
+        return content;
+    }
+
+    /**
+     * 构建/刷新来源URL索引（缓存60秒）
+     * 避免每次查重都遍历读取所有文件
+     */
+    _ensureSourceIndex() {
+        const now = Date.now();
+        if (this._sourceIndex && (now - this._sourceIndexTime) < 60000) {
+            return;
+        }
+
+        this._sourceIndex = new Map();
+        const files = this.scanFiles();
+        for (const file of files) {
+            try {
+                const head = fs.readFileSync(file.fullPath, 'utf-8').substring(0, 2000);
+                const urlMatches = head.match(/https?:\/\/[^\s\n]+/g);
+                if (urlMatches) {
+                    for (const url of urlMatches) {
+                        this._sourceIndex.set(url, file.fullPath);
+                    }
+                }
+                const bvidMatches = head.match(/BV[\w]+/g);
+                if (bvidMatches) {
+                    for (const bvid of bvidMatches) {
+                        this._sourceIndex.set(bvid, file.fullPath);
+                    }
+                }
+            } catch {}
+        }
+        this._sourceIndexTime = now;
+    }
+
+    /**
+     * 检查是否已存在相同来源的攻略（使用缓存索引，性能 O(1)）
+     * @param {string} sourceUrl - 来源URL或BV号
      * @returns {{exists: boolean, filePath: string|null}}
      */
     checkDuplicateSource(sourceUrl) {
         if (!sourceUrl) return { exists: false, filePath: null };
 
-        const files = this.scanFiles();
-        for (const file of files) {
-            try {
-                const head = fs.readFileSync(file.fullPath, 'utf-8').substring(0, 2000);
-                if (head.includes(sourceUrl)) {
-                    return { exists: true, filePath: file.fullPath };
-                }
-            } catch {
-                // skip unreadable files
-            }
+        this._ensureSourceIndex();
+
+        const filePath = this._sourceIndex.get(sourceUrl);
+        if (filePath && fs.existsSync(filePath)) {
+            return { exists: true, filePath };
         }
+
         return { exists: false, filePath: null };
+    }
+
+    /**
+     * 保存文件后使索引失效，下次查重会重建
+     */
+    _invalidateSourceIndex() {
+        this._sourceIndex = null;
+        this._sourceIndexTime = 0;
     }
 
     /**
@@ -140,15 +197,17 @@ class GuideLibrary {
     saveGuide({ gameName, tags, content, sources }) {
         this.ensureDirectory();
 
-        const sourceMarker = sources.map(s => {
-            if (s.type === 'gamersky') return 'GS';
-            if (s.type === 'bilibili') return 'BL';
-            return 'OT';
-        }).join('+');
+        const SOURCE_MARKERS = {
+            gamersky: 'GS', bilibili: 'BL', taptap: 'TT', nga: 'NGA', miyoushe: 'MYS'
+        };
+        const sourceMarker = sources
+            .map(s => SOURCE_MARKERS[s.type] || 'OT')
+            .join('+');
 
         const safeTags = tags.map(t => t.replace(/[\\/:*?"<>|\s]/g, '_')).join('_');
         const safeGame = gameName.replace(/[\\/:*?"<>|\s]/g, '_');
-        const fileName = `${safeGame}_${safeTags}_${sourceMarker}.txt`;
+        const timestamp = Date.now().toString(36);
+        const fileName = `${safeGame}_${safeTags}_${sourceMarker}_${timestamp}.txt`;
         const filePath = path.join(this.libraryPath, fileName);
 
         const sourceLines = sources.map(s => `  - ${s.type}: ${s.url}`).join('\n');
@@ -170,6 +229,7 @@ class GuideLibrary {
         ].join('\n');
 
         fs.writeFileSync(filePath, fileContent, 'utf-8');
+        this._invalidateSourceIndex();
         return filePath;
     }
 }

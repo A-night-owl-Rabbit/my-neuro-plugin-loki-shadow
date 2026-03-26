@@ -33,9 +33,10 @@ class LokiLogger {
         };
         this.steps.push(entry);
 
-        const statusIcon = status === 'ok' ? '✅' : status === 'skip' ? '⏭️' : status === 'fail' ? '❌' : '🔄';
+        const statusIcons = { ok: '✅', skip: '⏭️', fail: '❌', warn: '⚠️', start: '🔄' };
+        const statusIcon = statusIcons[status] || '🔄';
         const msg = `${TAG} [${this.sessionId}] ${statusIcon} ${stepName} (${elapsed}ms) ${detail}`;
-        logToTerminal(status === 'fail' ? 'error' : 'info', msg);
+        logToTerminal(status === 'fail' ? 'error' : status === 'warn' ? 'warn' : 'info', msg);
     }
 
     substep(parentStep, name, detail = '') {

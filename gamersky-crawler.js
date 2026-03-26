@@ -25,18 +25,12 @@ async function fetchPage(url, maxRetries = 3, timeout = 15000) {
 }
 
 /**
- * 搜索游民星空攻略
- * @param {string} keyword - 搜索关键词
- * @param {number} limit - 返回数量
- * @returns {Promise<Array<{title: string, url: string, type: string}>>}
+ * 从搜索页 HTML 中提取攻略结果
+ * @returns {Array<{title: string, url: string, type: string}>}
  */
-async function searchGuides(keyword, limit = 5) {
-    const searchUrl = `https://so.gamersky.com/?s=${encodeURIComponent(keyword)}`;
-    const response = await fetchPage(searchUrl, 3, 10000);
-    const $ = cheerio.load(response.data);
+function _extractGuidesFromPage($, limit) {
     const results = [];
 
-    // 精准选择器：攻略区
     $('.Midtit').each((_, element) => {
         const $title = $(element);
         if ($title.find('.tit').text().trim() === '游戏攻略') {
@@ -58,20 +52,21 @@ async function searchGuides(keyword, limit = 5) {
         }
     });
 
-    // 降级：URL 模式过滤
     if (results.length === 0) {
         const allLinks = [];
         $('a[href]').each((_, el) => {
             const $link = $(el);
             const title = $link.text().trim();
             const url = $link.attr('href');
-            if (title && url && title.length > 3 && title.length < 100 &&
-                url.includes('gamersky.com') &&
-                !url.includes('down.gamersky.com') &&
-                !url.includes('/down/') &&
-                !url.includes('so.gamersky.com') &&
-                !url.includes('?s=') &&
-                (url.includes('/handbook/') || url.includes('/gl/'))) {
+                if (title && url && title.length > 3 && title.length < 100 &&
+                    url.includes('gamersky.com') &&
+                    !url.includes('down.gamersky.com') &&
+                    !url.includes('/down/') &&
+                    !url.includes('so.gamersky.com') &&
+                    !url.includes('?s=') &&
+                    (url.includes('/handbook/') || url.includes('/gl/') ||
+                     url.includes('/content/') || url.includes('/news/') ||
+                     url.match(/\/\d{6}\/\d+\.shtml/))) {
                 allLinks.push({
                     title,
                     url: url.startsWith('http') ? url : `https://www.gamersky.com${url}`,
@@ -80,16 +75,54 @@ async function searchGuides(keyword, limit = 5) {
             }
         });
 
-        // 过滤包含关键词的结果
-        const kwLower = keyword.toLowerCase();
-        const filtered = allLinks.filter(item =>
-            item.title.toLowerCase().includes(kwLower)
-        );
-
-        results.push(...(filtered.length > 0 ? filtered : allLinks).slice(0, limit));
+        results.push(...allLinks.slice(0, limit));
     }
 
     return results;
+}
+
+/**
+ * 生成搜索关键词降级变体（从精确到宽泛）
+ * 例: "红色沙漠 采石场 攻略" → ["红色沙漠 采石场 攻略", "红色沙漠 采石场", "红色沙漠 攻略"]
+ */
+function _generateSearchVariants(keyword) {
+    const variants = [keyword];
+    const parts = keyword.split(/\s+/).filter(p => p.length > 0);
+
+    if (parts.length >= 3) {
+        variants.push(parts.slice(0, 2).join(' '));
+        variants.push(`${parts[0]} 攻略`);
+    } else if (parts.length === 2 && !parts[1].includes('攻略')) {
+        variants.push(`${parts[0]} 攻略`);
+    }
+
+    return [...new Set(variants)];
+}
+
+/**
+ * 搜索游民星空攻略（带自动关键词降级）
+ * @param {string} keyword - 搜索关键词
+ * @param {number} limit - 返回数量
+ * @returns {Promise<Array<{title: string, url: string, type: string}>>}
+ */
+async function searchGuides(keyword, limit = 5) {
+    const variants = _generateSearchVariants(keyword);
+
+    for (const variant of variants) {
+        const searchUrl = `https://so.gamersky.com/?s=${encodeURIComponent(variant)}`;
+        const response = await fetchPage(searchUrl, 3, 10000);
+        const $ = cheerio.load(response.data);
+        const results = _extractGuidesFromPage($, limit);
+
+        if (results.length > 0) {
+            if (variant !== keyword) {
+                console.log(`[游民星空] 原始关键词无结果，降级为 "${variant}" 后命中 ${results.length} 条`);
+            }
+            return results;
+        }
+    }
+
+    return [];
 }
 
 /**
@@ -111,8 +144,22 @@ async function downloadGuideContent(url) {
     if (pageLinks.length > 0) {
         const pageNumbers = new Set();
         pageLinks.each((_, el) => {
-            const match = $first(el).text().trim().match(/第(\d+)页/);
-            if (match) pageNumbers.add(parseInt(match[1]));
+            const text = $first(el).text().trim();
+            const chineseMatch = text.match(/第(\d+)页/);
+            if (chineseMatch) {
+                pageNumbers.add(parseInt(chineseMatch[1]));
+                return;
+            }
+            const numMatch = text.match(/^(\d+)$/);
+            if (numMatch) {
+                pageNumbers.add(parseInt(numMatch[1]));
+                return;
+            }
+            const href = $first(el).attr('href') || '';
+            const hrefMatch = href.match(/_(\d+)\.shtml/);
+            if (hrefMatch) {
+                pageNumbers.add(parseInt(hrefMatch[1]));
+            }
         });
         if (pageNumbers.size > 0) maxPage = Math.max(...Array.from(pageNumbers));
     }

@@ -28,6 +28,7 @@ const NGA_GAME_FORUMS = {
     '无限暖暖': 510373,
     '流放之路': 510481,
     '塞尔达': 510397,
+    '红色沙漠': 414,
 };
 
 function resolveForumId(gameName) {
@@ -63,10 +64,12 @@ async function ngaPost(lib, act, params = {}) {
 }
 
 /**
- * 在指定版块搜索帖子
+ * 搜索帖子（fid 为 null 时进行全站搜索）
  */
 async function searchThreads(fid, keyword, limit = 5) {
-    const data = await ngaPost('subject', 'search', { fid: String(fid), key: keyword });
+    const params = { key: keyword };
+    if (fid != null) params.fid = String(fid);
+    const data = await ngaPost('subject', 'search', params);
 
     let threads = data.result?.data;
     if (!threads) return [];
@@ -113,7 +116,7 @@ async function getThreadContent(tid, maxPages = 1) {
         if (posts.length === 0 && page > 1) break;
         allPosts.push(...posts);
 
-        const totalPage = resultObj.totalPage || data.totalPage || 1;
+        const totalPage = resultObj.__PAGE || resultObj.__T__ROWS_PAGE || resultObj.totalPage || data.totalPage || 1;
         if (page >= totalPage || page >= maxPages) break;
         await sleep(800);
     }
@@ -175,16 +178,48 @@ function cleanNgaText(text) {
 }
 
 /**
- * NGA 攻略搜索主入口
+ * 生成 NGA 搜索降级关键词列表
+ * NGA 搜索对多关键词匹配非常严格，需要逐步精简
+ */
+function _ngaSearchVariants(gameName, query) {
+    const variants = [];
+    const coreWords = query.replace(/攻略|流程|打法|怎么[打做过]|指南|教程|心得/g, '').trim();
+
+    variants.push(query);
+    if (coreWords && coreWords !== query) variants.push(coreWords);
+
+    const parts = coreWords.split(/[\s,，。、]+/).filter(p => p.length >= 2);
+    if (parts.length > 1) {
+        parts.forEach(p => variants.push(p));
+    }
+
+    variants.push(gameName + ' 攻略');
+
+    return [...new Set(variants.filter(v => v.length > 0))];
+}
+
+/**
+ * NGA 攻略搜索主入口（支持关键词降级 + 无版块ID全站搜索降级）
  */
 async function searchNGAGuides(gameName, query, limit = 1) {
     const fid = resolveForumId(gameName);
-    if (!fid) return [];
+    const variants = _ngaSearchVariants(gameName, query);
 
-    let threads = await searchThreads(fid, query, limit + 4);
+    let threads = [];
+
+    if (fid) {
+        for (const variant of variants) {
+            threads = await searchThreads(fid, variant, limit + 4);
+            if (threads.length > 0) break;
+        }
+    }
 
     if (threads.length === 0) {
-        threads = await searchThreads(fid, gameName + ' 攻略', limit + 2);
+        for (const variant of variants) {
+            const globalKeyword = variant.includes(gameName) ? variant : `${gameName} ${variant}`;
+            threads = await searchThreads(null, globalKeyword, limit + 4);
+            if (threads.length > 0) break;
+        }
     }
 
     if (threads.length === 0) return [];

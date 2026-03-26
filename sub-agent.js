@@ -41,23 +41,39 @@ class SubAgent {
      * 调用 LLM（带自动主/后备切换 + 重试）
      */
     async _call(systemPrompt, userMessage, retries = 2) {
-        const agents = this._useFallback && this.fallback
-            ? [this.fallback, this.primary]
-            : this.fallback
-                ? [this.primary, this.fallback]
-                : [this.primary];
+        if (this._useFallback && this.fallback && this._recoveryCounter === undefined) {
+            this._recoveryCounter = 0;
+        }
+        if (this._useFallback && this.fallback) {
+            this._recoveryCounter = (this._recoveryCounter || 0) + 1;
+        }
+
+        const shouldProbe = this._useFallback && this.fallback && (this._recoveryCounter % 5 === 0);
+
+        const agents = shouldProbe
+            ? [this.primary, this.fallback]
+            : this._useFallback && this.fallback
+                ? [this.fallback, this.primary]
+                : this.fallback
+                    ? [this.primary, this.fallback]
+                    : [this.primary];
 
         let lastError;
         for (const agent of agents) {
             try {
                 const result = await this._callAgent(agent, systemPrompt, userMessage, retries);
-                if (agent !== this.primary && this._useFallback) {
-                    console.log(`[洛基之影] 后备Agent ${agent.name} 成功响应`);
-                }
+
                 if (agent === this.primary) {
                     this._failCount = Math.max(0, this._failCount - 1);
-                    this._useFallback = false;
+                    if (this._failCount === 0) {
+                        this._useFallback = false;
+                        this._recoveryCounter = 0;
+                    }
+                    console.log(`[洛基之影] 主Agent ${agent.name} 成功响应 (failCount→${this._failCount})`);
+                } else {
+                    console.log(`[洛基之影] 后备Agent ${agent.name} 成功响应`);
                 }
+
                 return result;
             } catch (err) {
                 lastError = err;
@@ -77,6 +93,7 @@ class SubAgent {
      * 调用单个 Agent
      */
     async _callAgent(agent, systemPrompt, userMessage, retries) {
+        if (retries < 0) retries = 0;
         for (let attempt = 0; attempt <= retries; attempt++) {
             try {
                 const resp = await axios.post(`${agent.apiUrl}/chat/completions`, {
@@ -178,13 +195,17 @@ class SubAgent {
      * @returns {Promise<string[]>}
      */
     async generateTags(gameName, query, content) {
-        const system = `你是一个游戏攻略标签生成专家。为攻略内容生成2-5个简短标签，用于文件名和快速检索。
+        const system = `你是一个游戏攻略标签生成专家。为攻略内容生成2-5个标签，用于文件名和快速检索。
 要求：
-1. 标签应该概括攻略的核心内容（如：Boss战、剧情、任务、角色、装备等）
-2. 每个标签2-6个字
-3. 返回JSON数组格式：["标签1", "标签2", "标签3"]
+1. 第一个标签必须是用户问题中的任务名/章节名/Boss名等专有名词（原样保留，不要缩写或概括）
+2. 后续标签概括攻略的核心内容（如：Boss战、剧情、任务、角色、装备等），每个2-6个字
+3. 返回JSON数组格式：["任务原名", "标签2", "标签3"]
 4. 不要包含游戏名（游戏名会单独标注）
-只返回JSON数组，不要其他内容。`;
+只返回JSON数组，不要其他内容。
+
+示例：
+问题："曙光停摆于荒地之上 主线攻略" → ["曙光停摆于荒地之上", "主线攻略", "任务流程"]
+问题："无冠者 打法攻略" → ["无冠者", "Boss打法", "战斗技巧"]`;
 
         const user = `游戏：${gameName}\n问题：${query}\n\n内容摘要：\n${content.substring(0, 2000)}`;
 
@@ -206,10 +227,16 @@ class SubAgent {
             `${i + 1}. 标题: ${v.title} | UP主: ${v.author} | 播放: ${v.play} | 时长: ${v.duration}`
         ).join('\n');
 
-        const system = `你是一个游戏视频筛选助手。从B站视频搜索结果中选择最适合回答用户问题的视频。
-优先选择：攻略教程 > 剧情解说 > 游戏评测
-排除：直播录像、纯娱乐、无关内容
-只返回视频序号（纯数字），如果都不合适返回 "0"`;
+        const system = `你是一个视频筛选助手。从B站视频搜索结果中选择最适合回答用户问题的视频。
+选择规则（按优先级，必须严格遵守顺序）：
+1.【最重要】标题相关性：视频必须讲的是用户问的那个作品/游戏/角色。标题中只是碰巧包含部分关键词但实际是另一个作品的，必须排除。
+  例如：用户问"贵族转生"，标题是"暗杀者转生为异世界贵族"→ 这是不同作品，必须排除。
+2. 内容类型：剧情解读/解析 > 攻略教程/流程指引 > 单段剧情录屏 > 完整流程录屏 > 评测
+3. 时长偏好：优先10-30分钟，其次30-60分钟。超过60分钟的尽量避免
+4. 如果所有视频都超过60分钟，选其中最短的
+5. 排除：直播录像、纯娱乐、无关内容、标题含"全流程合集"的超长视频
+如果没有标题相关的视频，返回 "0"，不要勉强选一个不相关的。
+只返回视频序号（纯数字）。`;
 
         const user = `问题：${query}\n\n视频列表：\n${listStr}\n\n请返回最合适视频的序号：`;
 
@@ -226,6 +253,7 @@ class SubAgent {
      */
     async combineAndSummarize(gameName, query, sources) {
         const sourceLabels = {
+            local: '本地攻略库',
             gamersky: '游民星空',
             bilibili: 'B站视频',
             taptap: 'TapTap',

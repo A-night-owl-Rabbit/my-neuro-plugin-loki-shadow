@@ -22,12 +22,12 @@ const HEADERS = {
 const KNOWN_GAMES = {
     '原神': 168332,
     '鸣潮': 234280,
-    '崩坏星穹铁道': 229269,
-    '星穹铁道': 229269,
-    '星铁': 229269,
-    '绝区零': 284890,
-    '明日方舟': 26638,
-    '王者荣耀': 13413,
+    '崩坏星穹铁道': 224267,
+    '星穹铁道': 224267,
+    '星铁': 224267,
+    '绝区零': 234493,
+    '明日方舟': 70253,
+    '王者荣耀': 2301,
     '崩坏3': 22498,
 };
 
@@ -76,7 +76,7 @@ async function resolveGameId(gameName) {
  * 从攻略 landing 页获取 moment 列表
  * TapTap landing 结构：type=3 info_board_set（攻略分类），type=6 index（角色攻略）
  */
-async function getMomentsFromLanding(appId, query) {
+async function getMomentsFromLanding(appId) {
     const landing = await taptapGet(`game-guide/v1/landing?app_id=${appId}`);
     const sections = landing.data?.list || [];
 
@@ -92,13 +92,13 @@ async function getMomentsFromLanding(appId, query) {
                         if (m.id_str) {
                             allMoments.push({
                                 momentId: m.id_str,
+                                title: m.sharing?.title || m.title || '',
                                 boardName,
                                 createdTime: m.created_time || 0
                             });
                         }
                     }
                 }
-                // 提取 entity-collection ID 用于后续获取更多攻略
                 const collMatch = board.uri?.match(/entity-collection\?id=(\d+)/);
                 if (collMatch) {
                     try {
@@ -114,6 +114,48 @@ async function getMomentsFromLanding(appId, query) {
                                     momentId: m.id_str,
                                     title,
                                     boardName,
+                                    createdTime: m.created_time || 0
+                                });
+                            }
+                        }
+                        await sleep(400);
+                    } catch {}
+                }
+            }
+        }
+
+        // type 6: index（角色攻略索引）
+        if (section.type === 6 && section.index?.list) {
+            for (const entry of section.index.list) {
+                const entryName = entry.name || entry.title || '';
+                if (entry.moments && Array.isArray(entry.moments)) {
+                    for (const m of entry.moments) {
+                        if (m.id_str) {
+                            const title = m.sharing?.title || m.title || entryName;
+                            allMoments.push({
+                                momentId: m.id_str,
+                                title,
+                                boardName: entryName,
+                                createdTime: m.created_time || 0
+                            });
+                        }
+                    }
+                }
+                const collMatch = entry.uri?.match(/entity-collection\?id=(\d+)/);
+                if (collMatch) {
+                    try {
+                        const collResult = await taptapGet(
+                            `game-guide/v1/guide-entity-collection-detail?id=${collMatch[1]}&from=0&limit=10`
+                        );
+                        const items = collResult.data?.list || [];
+                        for (const item of items) {
+                            const m = item.moment || item;
+                            if (m.id_str) {
+                                const title = m.sharing?.title || m.title || entryName;
+                                allMoments.push({
+                                    momentId: m.id_str,
+                                    title,
+                                    boardName: entryName,
                                     createdTime: m.created_time || 0
                                 });
                             }
@@ -214,13 +256,40 @@ function stripHtml(html) {
 }
 
 /**
+ * 通过 API 搜索获取游戏 ID（绕过 KNOWN_GAMES 缓存）
+ */
+async function searchGameIdFromAPI(gameName) {
+    try {
+        const result = await taptapGet(`search/v2/app?kw=${encodeURIComponent(gameName)}&from=0&limit=3`);
+        const list = result.data?.list;
+        if (!list || list.length === 0) return null;
+        const bestMatch = list.find(item =>
+            item.app?.title?.includes(gameName) || gameName.includes(item.app?.title)
+        ) || list[0];
+        return bestMatch.app?.id || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * 搜索并获取 TapTap 攻略（对外主入口）
  */
 async function searchTapTapGuides(gameName, query, limit = 1) {
-    const appId = await resolveGameId(gameName);
+    let appId = await resolveGameId(gameName);
     if (!appId) return [];
 
-    const moments = await getMomentsFromLanding(appId, query);
+    let moments = await getMomentsFromLanding(appId);
+
+    if (moments.length === 0 && KNOWN_GAMES[gameName]) {
+        const freshId = await searchGameIdFromAPI(gameName);
+        if (freshId && freshId !== appId) {
+            console.log(`[TapTap] KNOWN_GAMES ID(${appId})无结果，API搜索到新ID: ${freshId}`);
+            appId = freshId;
+            moments = await getMomentsFromLanding(appId);
+        }
+    }
+
     if (moments.length === 0) return [];
 
     // 优先选标题匹配的
