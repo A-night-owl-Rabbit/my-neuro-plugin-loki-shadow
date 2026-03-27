@@ -103,7 +103,7 @@ npm install axios cheerio
 
 ### 2.0.1
 
-- 公开仓库默认配置去除本地机器路径与占位说明，默认攻略库路径与代码内兜底一致为 `./game-guides`（仍建议在界面或 JSON 中改为你的绝对路径）。
+- 修复UTF-8 BOM 问题
 - 完善中文 README：安装、配置、编码与隐私说明。
 
 ### 2.0.0
@@ -112,10 +112,6 @@ npm install axios cheerio
 
 ---
 
-## 隐私与安全
-
-- **切勿**将含真实 API Key、Cookie、个人路径的 `plugin_config.json` 推送到公开仓库。  
-- 若 Key 曾泄露，请在服务商控制台**立即轮换 / 作废**。
 
 ---
 
