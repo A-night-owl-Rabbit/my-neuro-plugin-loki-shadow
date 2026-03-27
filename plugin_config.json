@@ -1,26 +1,26 @@
 {
   "guide_library_path": {
     "title": "游戏攻略库路径",
-    "description": "本地游戏攻略库的绝对路径，攻略文件将保存到此目录",
+    "description": "本地游戏攻略库路径（建议使用绝对路径，便于写入缓存文件）",
     "type": "string",
     "default": "./game-guides",
-    "value": "./game-guides"
+    "value": ""
   },
   "sub_agent": {
     "title": "主智能体配置 (DeepSeek)",
-    "description": "负责攻略分析、内容整合、答案生成的主LLM",
+    "description": "负责攻略分析、内容整合、答案生成的主 LLM",
     "type": "object",
     "fields": {
       "api_key": {
         "title": "API Key",
-        "description": "硅基流动 API Key",
+        "description": "API Key（勿提交到公开仓库）",
         "type": "string",
         "default": "",
         "value": ""
       },
       "api_url": {
         "title": "API 地址",
-        "description": "硅基流动 API 基础地址",
+        "description": "OpenAI 兼容 API 基础地址",
         "type": "string",
         "default": "https://api.siliconflow.cn/v1",
         "value": "https://api.siliconflow.cn/v1"
@@ -40,8 +40,8 @@
         "value": 0.3
       },
       "max_tokens": {
-        "title": "最大Token数",
-        "description": "单次请求最大生成Token数",
+        "title": "最大 Token 数",
+        "description": "单次请求最大生成 Token 数",
         "type": "int",
         "default": 20000,
         "value": 20000
@@ -50,19 +50,19 @@
   },
   "fallback_agent": {
     "title": "后备智能体配置 (Qwen)",
-    "description": "主Agent失败时自动切换的后备LLM，使用Qwen大模型",
+    "description": "主 Agent 失败时自动切换的后备 LLM",
     "type": "object",
     "fields": {
       "api_key": {
         "title": "API Key",
-        "description": "硅基流动 API Key（可与主Agent共用）",
+        "description": "可与主 Agent 共用同一 Key",
         "type": "string",
         "default": "",
         "value": ""
       },
       "api_url": {
         "title": "API 地址",
-        "description": "硅基流动 API 基础地址",
+        "description": "OpenAI 兼容 API 基础地址",
         "type": "string",
         "default": "https://api.siliconflow.cn/v1",
         "value": "https://api.siliconflow.cn/v1"
@@ -82,8 +82,8 @@
         "value": 0.3
       },
       "max_tokens": {
-        "title": "最大Token数",
-        "description": "单次请求最大生成Token数",
+        "title": "最大 Token 数",
+        "description": "单次请求最大生成 Token 数",
         "type": "int",
         "default": 20000,
         "value": 20000
@@ -98,22 +98,22 @@
     "value": 1
   },
   "bilibili_search_limit": {
-    "title": "B站搜索数量",
-    "description": "B站视频搜索返回的结果数量",
+    "title": "B 站搜索数量",
+    "description": "B 站视频搜索返回的结果数量",
     "type": "int",
     "default": 3,
     "value": 3
   },
   "taptap_search_limit": {
-    "title": "TapTap搜索数量",
-    "description": "TapTap攻略搜索返回的数量上限",
+    "title": "TapTap 搜索数量",
+    "description": "TapTap 攻略搜索返回的数量上限",
     "type": "int",
     "default": 1,
     "value": 1
   },
   "nga_search_limit": {
-    "title": "NGA搜索数量",
-    "description": "NGA论坛攻略搜索返回的数量上限",
+    "title": "NGA 搜索数量",
+    "description": "NGA 论坛攻略搜索返回的数量上限",
     "type": "int",
     "default": 1,
     "value": 1
@@ -127,7 +127,7 @@
   },
   "max_content_length": {
     "title": "内容最大长度",
-    "description": "发送给智能体的单个文档最大字符数，防止token超限",
+    "description": "发送给智能体的单个文档最大字符数，防止 Token 超限",
     "type": "int",
     "default": 20000,
     "value": 20000

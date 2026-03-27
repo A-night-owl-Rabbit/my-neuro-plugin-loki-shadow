@@ -1,7 +1,7 @@
 {
   "name": "loki-shadow",
   "displayName": "洛基之影",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "爱熬夜的人形兔",
   "description": "游戏陪玩智能插件v2：5源并行（游民星空/B站/TapTap/NGA/米游社），DeepSeek主Agent+Qwen后备Agent，自动检测游戏、搜索本地攻略库、下载整合攻略、返回精准答案",
   "main": "index.js",
