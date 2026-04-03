@@ -1,4 +1,5 @@
 node_modules/
+package-lock.json
 test_run.js
 test_full.js
 *.log

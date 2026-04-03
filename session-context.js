@@ -4,6 +4,7 @@
  */
 
 const SLOT_KEYS = ['current_quest', 'current_boss', 'current_area', 'current_chapter'];
+const DEFAULT_CONTEXT_TTL_MS = 60000;
 
 /**
  * 层级联动清除规则：上级槽位变更时，自动清除其下级槽位。
@@ -20,7 +21,7 @@ class GameSessionContext {
     /**
      * @param {number} maxHistory - history 队列最大长度
      */
-    constructor(maxHistory = 5) {
+    constructor(maxHistory = 5, contextTtlMs = DEFAULT_CONTEXT_TTL_MS) {
         this.currentGame = null;
         this.slots = {
             current_quest: null,
@@ -31,6 +32,7 @@ class GameSessionContext {
         };
         this.history = [];
         this.maxHistory = maxHistory;
+        this.contextTtlMs = contextTtlMs;
         this.lastUpdateTime = null;
     }
 
@@ -42,6 +44,9 @@ class GameSessionContext {
     update(gameName, context) {
         if (!context || typeof context !== 'object') return;
 
+        if (this.isExpired()) {
+            this.reset();
+        }
         if (gameName && this.currentGame && gameName !== this.currentGame) {
             this.reset();
         }
@@ -94,6 +99,10 @@ class GameSessionContext {
      * @returns {{ keyword: string|null, source: string|null, allSlots: object }}
      */
     getSearchEnhancement() {
+        if (this.isExpired()) {
+            return { keyword: null, source: null, allSlots: {} };
+        }
+
         const priority = [
             { key: 'current_quest', suffix: '攻略' },
             { key: 'current_boss', suffix: '打法攻略' },
@@ -119,6 +128,8 @@ class GameSessionContext {
      * @returns {string}
      */
     getSummary() {
+        if (this.isExpired()) return '';
+
         const parts = [];
 
         if (this.currentGame) {
@@ -156,6 +167,8 @@ class GameSessionContext {
      * 返回当前状态的简短描述（用于 track 工具的返回值）
      */
     getStatusText() {
+        if (this.isExpired()) return '暂无有效游戏状态记录';
+
         const active = this._getActiveSlots();
         const keys = Object.keys(active);
         if (keys.length === 0 && this.slots.characters.length === 0) {
@@ -172,12 +185,17 @@ class GameSessionContext {
         return parts.join(' | ');
     }
 
+    isExpired() {
+        return !!this.lastUpdateTime && (Date.now() - this.lastUpdateTime > this.contextTtlMs);
+    }
+
     reset() {
         for (const key of SLOT_KEYS) {
             if (this.slots[key]) {
                 this._pushHistory(key, this.slots[key]);
             }
         }
+        this.currentGame = null;
         this.slots = {
             current_quest: null,
             current_boss: null,
@@ -200,6 +218,8 @@ class GameSessionContext {
     }
 
     _getActiveSlots() {
+        if (this.isExpired()) return {};
+
         const active = {};
         for (const key of SLOT_KEYS) {
             if (this.slots[key]) active[key] = this.slots[key];

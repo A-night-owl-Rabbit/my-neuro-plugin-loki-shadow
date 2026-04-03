@@ -28,7 +28,7 @@ class LokiShadowPlugin extends Plugin {
         super(metadata, context);
         this._orchestrator = null;
         this._config = null;
-        this._sessionCtx = new GameSessionContext(5);
+        this._sessionCtx = new GameSessionContext(5, 60000);
     }
 
     async onInit() {
@@ -58,8 +58,10 @@ class LokiShadowPlugin extends Plugin {
 你拥有一个强大的游戏陪玩后端系统"洛基之影"(loki_shadow_query)。请遵循以下协议：
 
 ■ 启用条件
-- 当你通过截图画面、用户对话内容、或任何线索判断用户正在玩游戏时，自动进入游戏陪玩模式。
-- 截图中出现游戏画面（角色、UI、战斗场景、地图、对话框等）即视为用户正在游戏中。
+- 只有在当前截图存在明确游戏证据时才进入游戏陪玩模式：游戏UI、任务栏、战斗HUD、地图、角色面板，或最近60秒内窗口/进程核验命中已知游戏。
+- 不能因为上一张图是游戏，就默认当前仍然是游戏；每次都要基于当前截图重新判断，不要使用场景惯性。
+- 如果画面像视频、过场动画或纯CG，但最近60秒内窗口/进程核验命中同一游戏，优先视为游戏内CG，而不是普通视频。
+- 如果是视频网站、播放器、直播回放等画面，且没有游戏窗口/进程作为佐证，不要启用游戏陪玩模式。
 
 ■ 截图分析 - 信息提取规范（核心）
 当收到游戏截图时，你必须按优先级提取以下结构化信息：
@@ -186,7 +188,7 @@ class LokiShadowPlugin extends Plugin {
                         properties: {
                             game_name: {
                                 type: 'string',
-                                description: '游戏名称（可选，不提供则通过检测窗口进程自动识别当前游戏）'
+                                description: '游戏名称（可选，不提供则通过最近60秒内的窗口/进程核验自动识别当前游戏）'
                             },
                             query: {
                                 type: 'string',

@@ -3,14 +3,14 @@
  * 为每次查询创建独立会话，记录工作流每个步骤的执行情况
  */
 
-let logToTerminal;
+let _logFn;
 try {
-    logToTerminal = require('../../../js/api-utils.js').logToTerminal;
+    _logFn = require('../../../js/api-utils.js').logToTerminal;
 } catch {
-    logToTerminal = (level, msg) => console.log(`[${level}] ${msg}`);
+    _logFn = (level, msg) => console.log(`[${level}] ${msg}`);
 }
 
-const TAG = '🗡️ [洛基之影]';
+const TAG = '[洛基之影]';
 
 let sessionCounter = 0;
 
@@ -36,7 +36,7 @@ class LokiLogger {
         const statusIcons = { ok: '✅', skip: '⏭️', fail: '❌', warn: '⚠️', start: '🔄' };
         const statusIcon = statusIcons[status] || '🔄';
         const msg = `${TAG} [${this.sessionId}] ${statusIcon} ${stepName} (${elapsed}ms) ${detail}`;
-        logToTerminal(status === 'fail' ? 'error' : status === 'warn' ? 'warn' : 'info', msg);
+        _logFn(status === 'fail' ? 'error' : status === 'warn' ? 'warn' : 'info', msg);
     }
 
     substep(parentStep, name, detail = '') {
@@ -50,7 +50,7 @@ class LokiLogger {
         };
         this.steps.push(entry);
 
-        logToTerminal('info', `${TAG} [${this.sessionId}]   ├─ ${name}: ${detail}`);
+        _logFn('info', `${TAG} [${this.sessionId}]   ├─ ${name}: ${detail}`);
     }
 
     error(stepName, error) {

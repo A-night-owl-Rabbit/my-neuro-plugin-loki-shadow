@@ -1,10 +1,7 @@
 /**
  * 洛基之影 - B站视频获取
- * 通过 global.localToolManager 调用已加载的 bilibili_mcp.js 工具
- * 降级方案：直接 require bilibili_mcp.js
+ * 通过 global.localToolManager 调用 bilibili-tools 插件注册的工具
  */
-
-const path = require('path');
 
 /**
  * 构造标准 toolCall 对象
@@ -30,18 +27,6 @@ function extractContent(result) {
     }
     if (result && result.content) return result.content;
     return JSON.stringify(result);
-}
-
-let _bilibiliModule = null;
-
-function getBilibiliModule() {
-    if (_bilibiliModule) return _bilibiliModule;
-    try {
-        _bilibiliModule = require(path.join(__dirname, '..', '..', '..', 'server-tools', 'bilibili_mcp.js'));
-    } catch {
-        _bilibiliModule = null;
-    }
-    return _bilibiliModule;
 }
 
 /**
@@ -85,38 +70,24 @@ function _parseSearchResult(rawResult) {
 }
 
 async function _doSearch(keyword, limit) {
-    let videos = null;
-
-    if (global.localToolManager && global.localToolManager.isEnabled) {
-        try {
-            const toolCall = makeToolCall('search_bilibili_video', { keyword, limit });
-            const result = await global.localToolManager.handleToolCalls([toolCall]);
-            const rawResult = extractContent(result);
-            videos = _parseSearchResult(rawResult);
-            if (!videos && rawResult) {
-                console.log(`[洛基之影·B站] localToolManager 返回无法解析: ${String(rawResult).substring(0, 120)}`);
-            }
-        } catch (err) {
-            console.log(`[洛基之影·B站] localToolManager 调用异常: ${err.message}`);
-        }
+    if (!global.localToolManager || !global.localToolManager.isEnabled) {
+        console.log('[洛基之影·B站] localToolManager 不可用，请确认 bilibili-tools 插件已启用');
+        return [];
     }
 
-    if (!videos) {
-        const mod = getBilibiliModule();
-        if (mod) {
-            try {
-                const rawResult = await mod.executeFunction('search_bilibili_video', { keyword, limit });
-                videos = _parseSearchResult(rawResult);
-                if (!videos && rawResult) {
-                    console.log(`[洛基之影·B站] 直接模块调用返回无法解析: ${String(rawResult).substring(0, 120)}`);
-                }
-            } catch (err) {
-                console.log(`[洛基之影·B站] 直接模块调用异常: ${err.message}`);
-            }
+    try {
+        const toolCall = makeToolCall('search_bilibili_video', { keyword, limit });
+        const result = await global.localToolManager.handleToolCalls([toolCall]);
+        const rawResult = extractContent(result);
+        const videos = _parseSearchResult(rawResult);
+        if (!videos && rawResult) {
+            console.log(`[洛基之影·B站] 搜索返回无法解析: ${String(rawResult).substring(0, 120)}`);
         }
+        return videos || [];
+    } catch (err) {
+        console.log(`[洛基之影·B站] 搜索调用异常: ${err.message}`);
+        return [];
     }
-
-    return videos || [];
 }
 
 /**
@@ -158,28 +129,23 @@ async function searchVideo(gameName, query, limit = 3) {
  * @returns {Promise<string>} 视频综合信息文本
  */
 async function getVideoSummary(bvid) {
-    let rawResult;
-
-    if (global.localToolManager && global.localToolManager.isEnabled) {
-        try {
-            const toolCall = makeToolCall('get_bilibili_video_comprehensive_info', { bvid });
-            const result = await global.localToolManager.handleToolCalls([toolCall]);
-            rawResult = extractContent(result);
-        } catch {}
+    if (!global.localToolManager || !global.localToolManager.isEnabled) {
+        throw new Error('B站视频信息获取失败: localToolManager 不可用，请确认 bilibili-tools 插件已启用');
     }
 
-    if (!rawResult) {
-        const mod = getBilibiliModule();
-        if (mod) {
-            rawResult = await mod.executeFunction('get_bilibili_video_comprehensive_info', { bvid });
+    try {
+        const toolCall = makeToolCall('get_bilibili_video_comprehensive_info', { bvid });
+        const result = await global.localToolManager.handleToolCalls([toolCall]);
+        const rawResult = extractContent(result);
+
+        if (!rawResult) {
+            throw new Error(`B站视频信息获取失败 (${bvid}): 返回为空`);
         }
-    }
 
-    if (!rawResult) {
-        throw new Error(`B站视频信息获取失败 (${bvid})`);
+        return typeof rawResult === 'string' ? rawResult : JSON.stringify(rawResult);
+    } catch (err) {
+        throw new Error(`B站视频信息获取失败 (${bvid}): ${err.message}`);
     }
-
-    return typeof rawResult === 'string' ? rawResult : JSON.stringify(rawResult);
 }
 
 module.exports = { searchVideo, getVideoSummary };

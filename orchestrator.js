@@ -368,7 +368,7 @@ class Orchestrator {
             const summary = log.getSummary();
             try {
                 const { logToTerminal } = require('../../../js/api-utils.js');
-                logToTerminal('info', `🗡️ [洛基之影] 执行摘要:\n${summary}`);
+                logToTerminal('info', `[洛基之影] 执行摘要:\n${summary}`);
             } catch {
                 console.log(summary);
             }
