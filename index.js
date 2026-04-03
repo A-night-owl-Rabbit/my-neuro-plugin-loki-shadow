@@ -9,6 +9,7 @@
  * 版本：2.0.0
  */
 
+const path = require('path');
 const { Plugin } = require('../../../js/core/plugin-base.js');
 const { Orchestrator } = require('./orchestrator');
 const { GameSessionContext } = require('./session-context');
@@ -240,8 +241,9 @@ class LokiShadowPlugin extends Plugin {
     }
 
     _loadConfig() {
+        const defaultGuideLibraryPath = path.join(__dirname, 'game-guides');
         const defaults = {
-            guide_library_path: './game-guides',
+            guide_library_path: defaultGuideLibraryPath,
             sub_agent: {
                 api_key: '',
                 api_url: 'https://api.siliconflow.cn/v1',
@@ -271,8 +273,13 @@ class LokiShadowPlugin extends Plugin {
 
             const _v = (val, def) => (val !== undefined && val !== null && val !== '') ? val : def;
 
+            const configuredGuideLibraryPath = _v(rawCfg.guide_library_path, defaults.guide_library_path);
+            const resolvedGuideLibraryPath = path.isAbsolute(configuredGuideLibraryPath)
+                ? configuredGuideLibraryPath
+                : path.resolve(__dirname, configuredGuideLibraryPath);
+
             this._config = {
-                guide_library_path: _v(rawCfg.guide_library_path, defaults.guide_library_path),
+                guide_library_path: resolvedGuideLibraryPath,
                 sub_agent: {
                     api_key: _v(subAgent.api_key, defaults.sub_agent.api_key),
                     api_url: _v(subAgent.api_url, defaults.sub_agent.api_url),
