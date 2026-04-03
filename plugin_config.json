@@ -1,7 +1,7 @@
 {
   "guide_library_path": {
     "title": "游戏攻略库路径",
-    "description": "本地游戏攻略库的绝对路径，攻略文件将保存到此目录",
+    "description": "游戏攻略库目录。默认使用插件目录下的 game-guides。支持社区共建 txt 攻略库分享计划：请按一份攻略一个 .txt 文件的方式补充内容，提交后可被所有使用者共享，人人为我，我为人人。",
     "type": "string",
     "default": "./game-guides",
     "value": "./game-guides"
