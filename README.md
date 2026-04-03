@@ -2,8 +2,6 @@
 
 **my-neuro** 生态下的 **live-2d 社区插件**，面向「游戏陪玩 / 游戏攻略辅助」场景：结合对话与截图上下文，记录任务与进度，并在需要时从本地攻略库与多平台来源检索、整合信息，给出贴近当前进度的辅助回答。
 
-**仓库地址：** [https://github.com/A-night-owl-Rabbit/my-neuro-plugin-loki-shadow](https://github.com/A-night-owl-Rabbit/my-neuro-plugin-loki-shadow)
-
 ---
 
 ## 功能概览
