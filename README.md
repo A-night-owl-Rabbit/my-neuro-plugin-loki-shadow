@@ -58,7 +58,7 @@ https://docs.qq.com/form/page/DV0xvTmp2VmxOa3VC?tdocapp_full_screen=1&templateId
 ## 环境要求
 
 - **Node.js**（与 my-neuro live-2d 一致）
-- 依赖：`axios`、`cheerio`（在 `live-2d` 目录执行 `npm install axios cheerio`）
+- **依赖**：`axios`、`cheerio`。本仓库已附带 **`node_modules/`** 与 **`package-lock.json`**（与插件目录内 `package.json` 对应），便于离线环境或需锁定依赖版本时直接使用。若你更习惯在 **live-2d** 根目录统一安装依赖，仍可在根目录执行 `npm install axios cheerio`；此时 Node 会按模块解析规则优先使用就近的 `node_modules`。
 - **Windows**：窗口检测相关能力依赖 PowerShell
 
 ## 适用场景
@@ -91,7 +91,10 @@ live-2d/plugins/community/loki-shadow/
 
 目录内应包含 `index.js`、`metadata.json`、`plugin_config.json` 及同仓库中的各模块文件。
 
-在 **live-2d** 根目录安装依赖：
+**依赖安装（二选一即可）：**
+
+1. **使用本仓库自带的 `node_modules/`**（推荐离线 / 固定版本）：克隆或解压后无需再执行 `npm install`，只要目录结构完整即可。
+2. **在 live-2d 根目录安装**（与旧版文档一致）：若未使用自带目录或希望与根目录依赖合并管理，可在 **live-2d** 根目录执行：
 
 ```bash
 npm install axios cheerio
