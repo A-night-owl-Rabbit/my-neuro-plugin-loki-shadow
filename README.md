@@ -225,11 +225,6 @@ npm install axios cheerio
 
 ---
 
-## 致谢
-
-- my-neuro 及社区
-- 各游戏社区公开内容来源
-
 ## 许可证
 
 本项目采用 **CC BY-NC-SA 4.0** 许可证。
