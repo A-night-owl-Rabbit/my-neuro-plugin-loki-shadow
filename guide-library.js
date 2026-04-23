@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { SiliconFlowEmbeddingModel } = require('./vector-store');
 
 class GuideLibrary {
     /**
@@ -14,6 +15,9 @@ class GuideLibrary {
         this.libraryPath = libraryPath;
         this._sourceIndex = null;
         this._sourceIndexTime = 0;
+        this._embeddingModel = null;
+        this._vectorIndex = null;
+        this._vectorIndexTime = 0;
     }
 
     /**
@@ -109,6 +113,84 @@ class GuideLibrary {
     }
 
     /**
+     * 读取完整攻略内容及基础元信息
+     * @param {object} file
+     * @returns {{file: object, content: string|null}}
+     */
+    readGuideEntry(file) {
+        if (!file || !file.fullPath) {
+            return { file, content: null };
+        }
+
+        return {
+            file,
+            content: this.readFile(file.fullPath, 0)
+        };
+    }
+
+    /**
+     * 获取本地向量模型实例
+     */
+    getEmbeddingModel(options = {}) {
+        if (!this._embeddingModel) {
+            this._embeddingModel = new SiliconFlowEmbeddingModel({
+                apiKey: options.apiKey,
+                apiUrl: options.apiUrl,
+                model: options.model,
+                cacheDir: options.cacheDir,
+                chunkSize: options.chunkSize,
+                chunkOverlap: options.chunkOverlap,
+                timeout: options.timeout
+            });
+        }
+        return this._embeddingModel;
+    }
+
+    /**
+     * 构建一个文件内容的向量缓存条目
+     * @param {object} file
+     * @param {object} [options]
+     */
+    async buildVectorEntry(file, options = {}) {
+        const embedding = this.getEmbeddingModel(options);
+        const content = this.readFile(file.fullPath, 0);
+        if (!content) return null;
+
+        return await embedding.buildEntry({
+            id: file.relativePath || file.fullPath,
+            title: file.fileName,
+            gameName: options.gameName || '',
+            content,
+            fileName: file.fileName,
+            relativePath: file.relativePath,
+            fullPath: file.fullPath,
+            force: Boolean(options.force)
+        });
+    }
+
+    /**
+     * 为多个文件并发构建向量条目
+     * @param {Array<object>} files
+     */
+    async buildVectorEntries(files, options = {}) {
+        return await Promise.all((files || []).map(file => this.buildVectorEntry(file, options)));
+    }
+
+    /**
+     * 向量 Top-K 检索
+     * @param {string} query
+     * @param {Array<object>} files
+     */
+    async searchByVector(query, files, options = {}) {
+        const embedding = this.getEmbeddingModel(options);
+        const entries = await this.buildVectorEntries(files, options);
+        const validEntries = entries.filter(Boolean);
+        const topK = options.topK || 5;
+        const expandedTopK = Math.max(topK * 4, topK + 8);
+        return await embedding.search(query, validEntries, expandedTopK);
+    }
+
+    /**
      * 剥离洛基之影自动生成的元数据头部和尾部，只保留纯攻略内容
      */
     _stripMetadata(content) {
@@ -198,7 +280,7 @@ class GuideLibrary {
         this.ensureDirectory();
 
         const SOURCE_MARKERS = {
-            gamersky: 'GS', bilibili: 'BL', taptap: 'TT', nga: 'NGA', miyoushe: 'MYS'
+            gamersky: 'GS', bilibili: 'BL', websearch: 'WS'
         };
         const sourceMarker = sources
             .map(s => SOURCE_MARKERS[s.type] || 'OT')

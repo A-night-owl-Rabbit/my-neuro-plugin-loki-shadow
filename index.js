@@ -1,52 +1,64 @@
 /**
- * 洛基之影 (Shadow of Loki) - 游戏陪玩智能插件 v2.0
+ * 洛基之影 (Shadow of Loki) - 游戏陪玩智能插件 v2.4.2
  *
- * 自动检测当前游戏、搜索本地攻略库、从5个来源并行下载攻略，
+ * 自动检测当前游戏、搜索本地攻略库、从3个来源并行下载攻略，
  * 通过 DeepSeek 主Agent（后备 Qwen）编排全流程，返回精准答案。
- * 来源：游民星空 | B站 | TapTap | NGA | 米游社
+ * 来源：游民星空 | B站 | 网络搜索
+ *
+ * v2.4.2: 移除 characters 角色栏追踪，避免其污染搜索意图改写与作用域判断
+ * v2.4.1: 移除剧情被动注入系统提示词机制；强化主对话硬约束，禁止外显内部决策/提纲/陪玩小抄
+ * v2.3.1: 收紧 track/query 的 game_name 约束；拒绝视频网站/浏览器等占位名；系统提示与工具说明对齐
+ * v2.3: 跨会话轻量持久化（攻略库目录 .loki-shadow-persist.json）；track 支持剧透偏好与玩家备注；
+ *       子 Agent 答案生成尊重偏好；系统提示对齐「桌宠/陪玩」类产品的主动关注与情绪共鸣
+ * v2.2: 移除 TapTap/NGA/米游社（准确度差），加入网络搜索；B站优先字幕+快速转录+登录检查
+ * v2.1: 拆分任务追踪（main_quest + current_step），增加来源门控防止对话推测覆盖主线任务
  *
  * 作者：爱熬夜的人形兔
- * 版本：2.0.0
+ * 版本：2.4.2
  */
 
-const path = require('path');
 const { Plugin } = require('../../../js/core/plugin-base.js');
 const { Orchestrator } = require('./orchestrator');
 const { GameSessionContext } = require('./session-context');
-
-let logToTerminal;
-try {
-    logToTerminal = require('../../../js/api-utils.js').logToTerminal;
-} catch {
-    logToTerminal = (level, msg) => console.log(`[${level}] ${msg}`);
-}
-
-const TAG = '🗡️ [洛基之影]';
+const { getGameSnapshot, saveGameSnapshot } = require('./persist-store');
+const { getTrackGameNameRejection } = require('./game-name-guard');
 
 class LokiShadowPlugin extends Plugin {
-    constructor(metadata, context) {
-        super(metadata, context);
-        this._orchestrator = null;
-        this._config = null;
-        this._sessionCtx = new GameSessionContext(5, 60000);
-    }
 
     async onInit() {
+        this._pluginConfig = this.context.getPluginConfig();
+        if (!this._pluginConfig.enabled) {
+            this.context.log('info', '洛基之影已禁用');
+            return;
+        }
+
+        this._sessionCtx = null;
+        this._orchestrator = null;
+        this._config = null;
+
         this._loadConfig();
-        logToTerminal('info', `${TAG} v2.0 插件初始化完成（含游戏状态追踪）`);
+        const ttl = this._config.session_context_ttl_ms ?? 60000;
+        this._sessionCtx = new GameSessionContext(5, ttl);
+        this.context.log('info', `洛基之影 v2.4.2 插件初始化完成（会话TTL=${ttl}ms，跨会话记忆=${this._config.enable_cross_session_memory !== false ? '开' : '关'}）`);
     }
 
     async onStart() {
+        if (!this._pluginConfig.enabled) return;
         if (!this._config) this._loadConfig();
+
         if (this._config) {
             const agentInfo = this._config.fallback_agent?.api_key
-                ? `主Agent: DeepSeek, 后备: Qwen`
-                : `Agent: DeepSeek (无后备)`;
-            logToTerminal('info', `${TAG} 插件已启动 | 攻略库: ${this._config.guide_library_path} | ${agentInfo}`);
+                ? '主Agent: DeepSeek, 后备: Qwen'
+                : 'Agent: DeepSeek (无后备)';
+            this.context.log('info', `洛基之影已启动 | 攻略库: ${this._config.guide_library_path} | ${agentInfo}`);
+        if (this._config.enable_cross_session_memory !== false) {
+            this.context.log('info', '洛基之影 跨会话状态将写入攻略库目录下的 .loki-shadow-persist.json');
+        }
         }
     }
 
     async onLLMRequest(request) {
+        if (!this._pluginConfig.enabled) return;
         if (!this._config) return;
 
         const sysMsg = request.messages.find(m => m.role === 'system');
@@ -55,178 +67,148 @@ class LokiShadowPlugin extends Plugin {
         const injection = `
 
 【洛基之影 · 游戏陪玩系统 - 行为协议】
-你拥有一个强大的游戏陪玩后端系统"洛基之影"(loki_shadow_query)。请遵循以下协议：
+你拥有游戏陪玩后端"洛基之影"(loki_shadow_track / loki_shadow_query)。
 
 ■ 启用条件
-- 只有在当前截图存在明确游戏证据时才进入游戏陪玩模式：游戏UI、任务栏、战斗HUD、地图、角色面板，或最近60秒内窗口/进程核验命中已知游戏。
-- 不能因为上一张图是游戏，就默认当前仍然是游戏；每次都要基于当前截图重新判断，不要使用场景惯性。
-- 如果画面像视频、过场动画或纯CG，但最近60秒内窗口/进程核验命中同一游戏，优先视为游戏内CG，而不是普通视频。
-- 如果是视频网站、播放器、直播回放等画面，且没有游戏窗口/进程作为佐证，不要启用游戏陪玩模式。
+- 当前截图存在游戏UI证据（任务栏、HUD、地图、角色面板）或最近60秒窗口/进程命中已知游戏时，进入陪玩模式。
+- 每次基于当前截图判断，不要场景惯性；但窗口核验命中同一游戏时，过场CG优先视为游戏内画面。
+- 视频网站/播放器/直播画面且无游戏进程佐证时，不启用陪玩模式。
+- game_name 只能是游戏作品正式名称，禁止填应用/平台名。
 
-■ 截图分析 - 信息提取规范（核心）
-当收到游戏截图时，你必须按优先级提取以下结构化信息：
-  1.【任务/关卡名称】截图中任务追踪栏、任务列表、章节标题等UI元素显示的完整任务名
-     例如："曙光停摆于荒地之上"、"第三章 永夜降临"、"支线：失落的信件"
-  2.【场景/地点名称】地图名、区域名、副本名等
-     例如："璃月港"、"枫丹廷"、"深渊螺旋第12层"
-  3.【角色/Boss名称】画面中出现的关键角色或正在战斗的Boss名
-     例如："钟离"、"风魔龙特瓦林"
-  4.【当前游戏阶段】根据画面UI判断用户处于什么阶段
-     例如：主线第几章、某个系列任务的哪一步、新手教程、endgame内容
+■ 截图信息提取
+游戏截图中按优先级提取：①任务/关卡名 ②场景/地点名 ③角色/Boss名 ④当前游戏阶段。
+⚠️ 禁止把NPC对话原文、旁白直接当query，必须转化为结构化关键词。
 
-⚠️ 绝对禁止把截图中NPC对话文本、旁白、系统提示等原始文字直接作为query。
-   这些只言片语无法搜索到攻略，必须转化为上述结构化信息。
+■ 状态追踪核心原则
+- 确认是游戏场景时应调用 track；非游戏场景或无法确定作品名时不要 track。
+- main_quest 严格管控：只接受 screenshot 和 user_confirmed 来源，讨论剧情角色不等于任务变了，不确定就不要传。
+- current_chapter：截图中看到章节信息时必须填写，看不到可不填。章节信息对系统追踪进度很重要。
+- 讨论剧情角色时，只更新 current_step（记录具体情节推进），绝不动 main_quest。
+- track 和 query 独立：track 不触发搜索；query 也不是每轮必调，只有你真的有明确问题时才调用。各字段详见工具参数说明。
 
-■ 游戏状态追踪（每次都要做！）
-- 你拥有 loki_shadow_track 工具，用于持续记录游戏状态。这是轻量操作，瞬间返回，请放心频繁调用。
-- 每当你看到游戏截图或和用户聊到游戏内容时，必须调用 loki_shadow_track 报告你观察到的游戏状态：
-  · current_quest：从任务追踪栏/任务列表中提取的当前任务名
-  · current_boss：正在战斗或即将战斗的Boss名
-  · current_area：当前所在区域/地图名
-  · current_chapter：当前章节
-  · characters：当前相关的角色名列表
-- 这些信息可能不在当前截图中，而是来自之前的截图或对话，请从你的对话记忆中提取。
-- 当游戏进度变化时（换任务、换地图、打完Boss），传入最新状态即可，旧状态会自动归档。
-- ⚠️ track 和 query 是独立的：track 只记录状态不搜索，query 搜索时会自动利用已记录的状态。
-  即使你不打算搜索攻略，也要 track 状态！这些信息会在后续搜索时自动增强搜索质量。
+■ query 调用门槛
+- 先想清楚"你具体想知道什么"，再决定是否调用 loki_shadow_query。不要因为用户正在玩游戏，就把 query 当作每轮必做动作。
+- query 里应填写具体问题或明确想了解的事情，例如："这个任务下一步怎么触发？"、"这个Boss二阶段怎么处理？"、"刚才这句台词大概在表达什么？"。
+- 不要把 query 写成空泛需求，例如："搜一下剧情"、"看看现在发生了什么"、"随便找点谈资"。
+- 问题还不具体时，先像朋友一样自然追问一次，补齐任务名、章节名、角色名、地点名或卡点，再调用 query。
 
-■ 谈资获取 - 主动陪玩
-- 你的目标是做一个"已经通关的好朋友"，需要主动获取信息来维持有质量的游戏陪聊。
-- 看到游戏截图时，即使用户没有提问，你也应该：
-  1. 先调用 loki_shadow_track 记录游戏状态（必做）
-  2. 判断是否需要获取谈资，如需要则调用 loki_shadow_query
-  3. 用获取到的信息自然地和用户互动（评论剧情、讨论角色、分享感受）
-- 这不是被动回答问题，而是主动获取知识来陪伴玩家。
+■ 主动陪玩
+- 目标：做一个已经通关的好朋友，但要先明确疑问，再检索答案来陪伴。
+- 当你对某个角色、地点、势力、剧情点、Boss机制有具体想了解的事情时，再调用 query 补充知识；没有明确疑问就继续自然陪聊。
+- 工具返回内容必须先消化，再转写成自然聊天，不要原封不动念给用户。
 
-■ 答案处理 - 防剧透原则（最重要）
-- 从 loki_shadow_query 获得的答案包含详细的剧情/攻略信息，但你绝对不能直接复述给用户！
-- 你必须根据用户当前的游戏进度进行信息过滤：
-  · 如果用户在某个关卡卡住了 → 给出不涉及后续剧情的操作提示和鼓励，分步引导
-  · 如果用户对当前剧情感兴趣 → 只讨论用户已经经历过的部分，对未来情节用暗示性语言
-  · 如果用户主动要求剧透 → 可以适当透露，但用"你确定要知道吗？"之类的方式确认
-- 引导风格：像一个已经通关的好朋友，用轻松自然的方式聊天，而不是念攻略。
+■ 防剧透 + 互动风格
+- 获取的信息不能直接复述，必须根据用户进度过滤：卡关→分步引导，对剧情感兴趣→只聊已经历部分，主动要剧透→确认后再说。
+- 用户卡关先问"你试过XX了吗？"，不直接给答案。看到截图自然评论，吐槽时先接住情绪再给建议。
+- 若用户表示剧透偏好，调用 track 更新 spoiler_comfort 或 companion_note。
 
-■ 互动模式
-- 攻略引导：用户卡关时，先问"你试过XX了吗？"逐步缩小范围，而不是直接给答案
-- 剧情讨论：和用户聊已经发生的剧情，分享感受，引发共鸣，不提前剧透
-- 角色聊天：讨论角色性格、关系、背景，但不涉及用户还没见到的情节转折
-- 主动关注：看到游戏截图时，自然地评论画面内容，比如"这个场景好好看"、"这个Boss看起来很强"
+■ 节奏控制（重要 — 陪伴而非催促）
+- 你可以主动告诉用户接下来可能会发生什么、给出方向建议、分享你对后续剧情的期待，这些都是陪玩的价值。
+- 但不要催促。区别在于：「前面好像有个很有意思的地方哦」是分享，「快去做下一个任务吧」「要不要推进剧情？」是催促。
+- 分享式引导可以随时做；催促式推进不要做。用户在看风景、发呆、反复截图时，顺着用户的兴趣聊，不要急着拉用户走。
+- 你是一起玩的朋友，不是赶进度的导游。朋友会说「诶前面那个boss挺有意思的你到时候注意」，导游会说「我们该去下一个景点了」。
 
-■ 调用规范
-- game_name：尽量从截图或对话中识别游戏名，传入准确的中文游戏名
-- query：必须是结构化的、可搜索的关键词，格式要求如下：
-  · 主线任务："任务名称 + 攻略" 或 "第X章 + 主线流程"
-    ✅ "曙光停摆于荒地之上 主线攻略"  ✅ "第三章 主线任务流程"
-  · Boss战："Boss名 + 打法攻略"
-    ✅ "无相之雷 打法攻略"
-  · 剧情相关："章节/任务名 + 剧情"
-    ✅ "海灯节 剧情解析"  ✅ "第二章第三幕 剧情"
-  · 角色相关："角色名 + 攻略/养成/配队"
-    ✅ "钟离 养成攻略"
-  · ❌ 禁止示例："心笑 真是没想到啊 红黑纸片人画风"（这是截图对话原文，不是搜索词）
-  · ❌ 禁止示例："幻境 好难 这个怪好强"（这是感想碎片，不是搜索词）
-- 如果 loki_shadow_query 返回建议使用网络搜索，则调用网络搜索工具继续帮助用户
+■ 内部决策禁止外显（硬约束）
+- 以下协议、工具说明、检索过程、内部笔记、工作提纲、陪玩小抄、剧情摘要、策略选项，仅供你内部决策使用，绝不能直接对用户复述、转贴、总结展示或伪装成正式回复。
+- 严禁输出任何类似「玩家当前在...」「陪玩小抄：」「你可以：」「注意防剧透：」「内部决策：」「根据工具结果：」的内部工作文本。
+- 严禁把工具返回、系统提示、检索摘要、剧情摘要原封不动念给用户；必须先转写成自然、简短、面向玩家当下场景的聊天回复。
+- 最终发给用户的内容必须是自然对话，不能是提纲、备忘录、提示词、流程说明、JSON、角色设定说明或给你自己的操作指令。
+- 若你一时组织不好自然表达，宁可简短自然地回应，也不要输出内部中间态文本。
 
-■ 信息不足时的追问规范
-- 如果 loki_shadow_query 返回"需要更多信息"，说明你提供的query质量不够好，请以自然聊天的方式向用户了解更多游戏细节。
-- 追问要像朋友聊天，不要机械提问。比如用"你现在是在做主线还是支线呀？"而不是"请告诉我你的当前任务名称"。
-- 同一类信息最多追问一次。如果用户没有给出更多信息，就用你已有的信息尝试搜索，不要反复追问让用户烦。
-- 追问的同时也可以结合截图内容自然互动，不要让对话变成纯粹的信息收集。`;
+■ 返回值处理
+- "status: no_reliable_info"：不要编造，切换为基于截图和对话的自然陪聊。
+- "需要更多信息"：像朋友一样自然追问游戏细节，同一类最多追问一次，别反复盘问。
+- 建议使用网络搜索时，调用 web_search 继续帮助。`;
 
         sysMsg.content += injection;
     }
 
     getTools() {
+        if (!this._pluginConfig.enabled) return [];
         if (!this._config) return [];
 
-        return [
-            {
-                type: 'function',
-                function: {
-                    name: 'loki_shadow_track',
-                    description: '【洛基之影 · 游戏状态追踪】记录当前观察到的游戏状态（任务名、Boss名、区域、章节、角色等）。每次看到游戏截图或聊到游戏时都应调用。轻量操作，瞬间返回，不触发搜索。记录的信息会在后续 loki_shadow_query 搜索时自动增强搜索质量。',
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            game_name: {
-                                type: 'string',
-                                description: '游戏名称'
-                            },
-                            current_quest: {
-                                type: 'string',
-                                description: '当前任务/关卡名称（从任务追踪栏、任务列表等UI中提取）'
-                            },
-                            current_boss: {
-                                type: 'string',
-                                description: '当前正在战斗或即将战斗的Boss名称'
-                            },
-                            current_area: {
-                                type: 'string',
-                                description: '当前所在区域/地图/场景名称'
-                            },
-                            current_chapter: {
-                                type: 'string',
-                                description: '当前章节（如"第三章"、"序章"等）'
-                            },
-                            characters: {
-                                type: 'array',
-                                items: { type: 'string' },
-                                description: '当前相关角色名列表'
-                            }
-                        },
-                        required: ['game_name']
-                    }
-                }
-            },
-            {
-                type: 'function',
-                function: {
-                    name: 'loki_shadow_query',
-                    description: '【洛基之影 · 游戏陪玩】查询攻略/剧情信息。先搜索本地攻略库，不足时自动从游民星空、B站、TapTap、NGA、米游社5个来源并行下载新攻略并整合。会自动利用 loki_shadow_track 记录的游戏状态来增强搜索质量。你应当对返回的信息进行防剧透处理后再告知用户。',
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            game_name: {
-                                type: 'string',
-                                description: '游戏名称（可选，不提供则通过最近60秒内的窗口/进程核验自动识别当前游戏）'
-                            },
-                            query: {
-                                type: 'string',
-                                description: '具体问题，如：某Boss怎么打、第三章剧情是什么、某任务怎么做等'
-                            }
-                        },
-                        required: ['query']
-                    }
-                }
-            }
-        ];
+        return [TRACK_TOOL, QUERY_TOOL];
     }
 
     async executeTool(name, params) {
-        if (name === 'loki_shadow_track') {
-            return this._handleTrack(params);
+        if (!this._pluginConfig.enabled) return undefined;
+
+        switch (name) {
+            case 'loki_shadow_track':
+                return this._handleTrack(params);
+            case 'loki_shadow_query':
+                return await this._handleQuery(params);
+            default:
+                return undefined;
         }
-        if (name === 'loki_shadow_query') {
-            return this._handleQuery(params);
-        }
-        return undefined;
+    }
+
+    async onStop() {
+        this.context.log('info', '洛基之影已停止');
     }
 
     _handleTrack(params) {
-        const { game_name, current_quest, current_boss, current_area, current_chapter, characters } = params;
+        const { game_name, source, main_quest, current_step, current_quest,
+                current_boss, current_area, current_chapter,
+                spoiler_comfort, companion_note } = params;
 
         if (!game_name) {
             return '【洛基之影】game_name 不能为空';
         }
 
-        this._sessionCtx.update(game_name, {
-            current_quest, current_boss, current_area, current_chapter, characters
-        });
+        const nameReject = getTrackGameNameRejection(game_name);
+        if (nameReject) {
+            this.context.log(
+                'info',
+                `洛基之影 track 已忽略非游戏名称 game_name="${game_name}" (${nameReject})`
+            );
+            return '【洛基之影】未记录：game_name 必须是用户正在玩的**游戏作品**正式名，不能用视频网站、浏览器、播放器等应用名。当前画面若非游戏界面或无法确定作品名，请不要调用 loki_shadow_track。';
+        }
+
+        const libPath = this._config?.guide_library_path;
+        const persistOn = this._config?.enable_cross_session_memory !== false;
+
+        if (persistOn && libPath) {
+            const switching = this._sessionCtx.currentGame && game_name !== this._sessionCtx.currentGame;
+            const coldStart = !this._sessionCtx.lastUpdateTime;
+            if (switching) {
+                this._sessionCtx.reset();
+                const snap = getGameSnapshot(libPath, game_name);
+                if (snap) this._sessionCtx.hydrateFromSnapshot(snap);
+            } else if (coldStart) {
+                const snap = getGameSnapshot(libPath, game_name);
+                if (snap) this._sessionCtx.hydrateFromSnapshot(snap);
+            }
+        }
+
+        // 校验 source，默认降级为 conversation（最低权限）
+        const validSources = ['screenshot', 'conversation', 'user_confirmed'];
+        const validSource = validSources.includes(source) ? source : 'conversation';
+
+        const { warnings } = this._sessionCtx.update(game_name, {
+            main_quest, current_step, current_quest, // current_quest 做兼容映射
+            current_boss, current_area, current_chapter,
+            spoiler_comfort, companion_note
+        }, validSource);
+
+        if (persistOn && libPath) {
+            try {
+                saveGameSnapshot(libPath, game_name, this._sessionCtx.toSnapshot());
+            } catch (err) {
+                this.context.log('warn', `洛基之影 持久化失败: ${err.message}`);
+            }
+        }
 
         const status = this._sessionCtx.getStatusText();
-        logToTerminal('info', `${TAG} 状态追踪更新 | 游戏: ${game_name} | ${status}`);
+        this.context.log('info', `洛基之影 状态追踪更新 | 游戏: ${game_name} | 来源: ${validSource} | ${status}`);
 
-        return `【洛基之影 · 状态已记录】${game_name} | ${status}`;
+        // 如果有警告（如主线任务被拦截），附加到返回信息中
+        let result = `【洛基之影 · 状态已记录】${game_name} | ${status}`;
+        if (warnings.length > 0) {
+            result += '\n\n' + warnings.join('\n');
+            this.context.log('warn', `洛基之影 追踪警告: ${warnings.join(' | ')}`);
+        }
+        return result;
     }
 
     async _handleQuery(params) {
@@ -236,16 +218,23 @@ class LokiShadowPlugin extends Plugin {
             return '【洛基之影】请提供具体的问题（query 参数不能为空）';
         }
 
-        logToTerminal('info', `${TAG} 收到查询请求 | 游戏: ${game_name || '(自动检测)'} | 问题: ${query}`);
+        if (game_name && getTrackGameNameRejection(game_name)) {
+            this.context.log(
+                'info',
+                `洛基之影 query 已拒绝非游戏名称 game_name="${game_name}"，请省略 game_name 或传入真实作品名`
+            );
+            return '【洛基之影】query 的 game_name 不能是视频网站/浏览器等应用名；请省略 game_name 让系统自动检测窗口中的游戏，或传入真实游戏作品名后重试。';
+        }
+
+        this.context.log('info', `洛基之影 收到查询请求 | 游戏: ${game_name || '(自动检测)'} | 问题: ${query}`);
 
         this._ensureOrchestrator();
         return await this._orchestrator.execute(game_name || null, query.trim(), this._sessionCtx);
     }
 
     _loadConfig() {
-        const defaultGuideLibraryPath = path.join(__dirname, 'game-guides');
         const defaults = {
-            guide_library_path: defaultGuideLibraryPath,
+            guide_library_path: 'K:\\\\neruo\\\\my-neuro-main\\\\肥牛的秘密基地\\\\游戏攻略库',
             sub_agent: {
                 api_key: '',
                 api_url: 'https://api.siliconflow.cn/v1',
@@ -262,26 +251,25 @@ class LokiShadowPlugin extends Plugin {
             },
             gamersky_download_limit: 1,
             bilibili_search_limit: 3,
-            taptap_search_limit: 1,
-            nga_search_limit: 1,
-            miyoushe_search_limit: 1,
-            max_content_length: 20000
+            max_content_length: 40000,
+            per_source_context_chars: 25000,
+            vector_top_k: 5,
+            vector_api_key: '',
+            vector_api_url: 'https://api.siliconflow.cn/v1',
+            vector_model_name: 'Qwen/Qwen3-Embedding-8B',
+            session_context_ttl_ms: 60000,
+            enable_cross_session_memory: true
         };
 
         try {
-            const rawCfg = this.context.getPluginConfig();
+            const rawCfg = this._pluginConfig;
             const subAgent = rawCfg.sub_agent || {};
             const fallbackAgent = rawCfg.fallback_agent || {};
 
             const _v = (val, def) => (val !== undefined && val !== null && val !== '') ? val : def;
 
-            const configuredGuideLibraryPath = _v(rawCfg.guide_library_path, defaults.guide_library_path);
-            const resolvedGuideLibraryPath = path.isAbsolute(configuredGuideLibraryPath)
-                ? configuredGuideLibraryPath
-                : path.resolve(__dirname, configuredGuideLibraryPath);
-
             this._config = {
-                guide_library_path: resolvedGuideLibraryPath,
+                guide_library_path: _v(rawCfg.guide_library_path, defaults.guide_library_path),
                 sub_agent: {
                     api_key: _v(subAgent.api_key, defaults.sub_agent.api_key),
                     api_url: _v(subAgent.api_url, defaults.sub_agent.api_url),
@@ -298,13 +286,19 @@ class LokiShadowPlugin extends Plugin {
                 },
                 gamersky_download_limit: _v(rawCfg.gamersky_download_limit, defaults.gamersky_download_limit),
                 bilibili_search_limit: _v(rawCfg.bilibili_search_limit, defaults.bilibili_search_limit),
-                taptap_search_limit: _v(rawCfg.taptap_search_limit, defaults.taptap_search_limit),
-                nga_search_limit: _v(rawCfg.nga_search_limit, defaults.nga_search_limit),
-                miyoushe_search_limit: _v(rawCfg.miyoushe_search_limit, defaults.miyoushe_search_limit),
-                max_content_length: _v(rawCfg.max_content_length, defaults.max_content_length)
+                max_content_length: _v(rawCfg.max_content_length, defaults.max_content_length),
+                per_source_context_chars: _v(rawCfg.per_source_context_chars, defaults.per_source_context_chars),
+                vector_top_k: _v(rawCfg.vector_top_k, defaults.vector_top_k),
+                vector_api_key: _v(rawCfg.vector_api_key, _v(subAgent.api_key, defaults.sub_agent.api_key)),
+                vector_api_url: _v(rawCfg.vector_api_url, _v(subAgent.api_url, defaults.sub_agent.api_url)),
+                vector_model_name: _v(rawCfg.vector_model_name, defaults.vector_model_name),
+                session_context_ttl_ms: _v(rawCfg.session_context_ttl_ms, defaults.session_context_ttl_ms),
+                enable_cross_session_memory: rawCfg.enable_cross_session_memory === false
+                    ? false
+                    : (rawCfg.enable_cross_session_memory === true ? true : defaults.enable_cross_session_memory)
             };
         } catch (err) {
-            logToTerminal('warn', `${TAG} 配置加载失败，使用默认值: ${err.message}`);
+            this.context.log('warn', `洛基之影 配置加载失败，使用默认值: ${err.message}`);
             this._config = defaults;
         }
 
@@ -317,5 +311,81 @@ class LokiShadowPlugin extends Plugin {
         }
     }
 }
+
+// --- 工具定义 ---
+
+const TRACK_TOOL = {
+    type: 'function',
+    function: {
+        name: 'loki_shadow_track',
+        description: '【洛基之影 · 游戏状态追踪】仅在用户正在玩某款游戏、且能确定该作品正式名时调用；game_name 必须是游戏名，禁止用哔哩哔哩/Chrome 等应用或平台名。纯看视频/直播/浏览器且无游戏 UI 时不要调用。轻量、不触发搜索。main_quest 只接受 screenshot 与 user_confirmed。',
+        parameters: {
+            type: 'object',
+            properties: {
+                game_name: {
+                    type: 'string',
+                    description: '正在玩的游戏作品正式名称（如 原神、鸣潮）；禁止客户端/网站名（如 哔哩哔哩、Chrome）'
+                },
+                source: {
+                    type: 'string',
+                    enum: ['screenshot', 'conversation', 'user_confirmed'],
+                    description: '信息来源。screenshot=从截图UI中提取的信息；conversation=从对话推测的信息；user_confirmed=用户明确告知的信息。main_quest只接受screenshot和user_confirmed来源。'
+                },
+                main_quest: {
+                    type: 'string',
+                    description: '主线任务名称。仅在截图任务栏中看到任务名（source=screenshot）或用户明确告知切换任务（source=user_confirmed）时才填写。不要从对话剧情讨论中推测！'
+                },
+                current_step: {
+                    type: 'string',
+                    description: '当前子步骤/正在做的具体事情（如"与椿对话"、"寻找线索"）。可以从对话或截图中推测，可频繁更新。'
+                },
+                current_boss: {
+                    type: 'string',
+                    description: '当前正在战斗或即将战斗的Boss名称'
+                },
+                current_area: {
+                    type: 'string',
+                    description: '当前所在区域/地图/场景名称'
+                },
+                current_chapter: {
+                    type: 'string',
+                    description: '当前章节（如"第三章 永夜降临"、"序章"、"间章·心相之径"等）。截图中能看到章节标题/分组标签时必须填写，不能省略；纯对话推测无截图时可不填。'
+                },
+                spoiler_comfort: {
+                    type: 'string',
+                    enum: ['strict', 'mild', 'full'],
+                    description: '剧透/讲解深度偏好。strict=强防剧透（默认）；mild=可适度暗示方向；full=可较完整流程与剧情要点。用户口头说「别剧透」「随便剧透」时应更新。'
+                },
+                companion_note: {
+                    type: 'string',
+                    description: '玩家陪玩偏好短备注，如「想自己探索」「只要打法不要剧情」「只聊角色」等，供攻略子Agent与主对话参考。'
+                }
+            },
+            required: ['game_name', 'source']
+        }
+    }
+};
+
+const QUERY_TOOL = {
+    type: 'function',
+    function: {
+        name: 'loki_shadow_query',
+        description: '【洛基之影 · 游戏陪玩】仅在你对当前游戏有明确、具体的问题时调用，例如想知道任务下一步、Boss机制、角色背景、某句台词含义、某段剧情信息。先由主对话模型想清楚自己具体要问什么，再把这个具体问题交给洛基之影检索。不是每轮对话必调；没有明确疑问时继续自然陪聊即可。会先搜索本地攻略库，不足时再从游民星空、B站、网络搜索并行补充。你应当对返回的信息做防剧透处理后再告诉用户。',
+        parameters: {
+            type: 'object',
+            properties: {
+                game_name: {
+                    type: 'string',
+                    description: '游戏作品正式名（可选）；勿填视频网站/浏览器名。省略时由最近60秒内窗口/进程自动识别'
+                },
+                query: {
+                    type: 'string',
+                    description: '必须填写主对话模型此刻真正想弄清楚的具体问题。可以是完整问句，也可以是高度明确的检索型问题。推荐格式："这个任务下一步怎么触发？"、"这个Boss二阶段怎么打？"、"刚才这句台词想表达什么？"、"XX角色和YY是什么关系？"。禁止空泛表达，如"搜一下剧情"、"看看发生了什么"、"随便找点信息"；也不要直接塞NPC原话碎片，除非同时说明你想弄清楚什么。'
+                }
+            },
+            required: ['query']
+        }
+    }
+};
 
 module.exports = LokiShadowPlugin;

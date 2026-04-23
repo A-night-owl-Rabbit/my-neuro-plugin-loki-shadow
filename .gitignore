@@ -1,4 +1,3 @@
-test_run.js
-test_full.js
+# Runtime / local (not for distribution)
+.vector-cache
 *.log
-.DS_Store

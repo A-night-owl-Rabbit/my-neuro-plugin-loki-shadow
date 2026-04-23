@@ -22,6 +22,10 @@ const GAME_KEYWORDS = {
     '寂静岭': ['Silent Hill', '寂静岭'],
     '合金装备': ['Metal Gear', '合金装备'],
     'Minecraft': ['Minecraft', 'minecraft'],
+    '艾尔登法环': ['ELDEN RING', 'EldenRing', '艾尔登法环'],
+    '只狼': ['Sekiro', '只狼'],
+    '怪物猎人：世界': ['MonsterHunterWorld', '怪物猎人', 'Monster Hunter: World'],
+    '赛博朋克2077': ['Cyberpunk2077', '赛博朋克 2077', 'Cyberpunk 2077'],
 };
 
 const DETECTION_CACHE_MS = 60000;
@@ -123,7 +127,9 @@ function buildCandidate(proc) {
 
         for (const keyword of keywords) {
             const keywordLower = normalizeText(keyword);
-            const shortKeyword = keywordLower.length < 3;
+            // 仅对纯 ASCII 短词禁用标题匹配，避免 "ai" 等误命中；中文双字（如「鸣潮」）长度=2 必须允许标题匹配
+            const asciiOnly = !/[^\x00-\x7f]/.test(keywordLower);
+            const shortKeyword = asciiOnly && keywordLower.length < 3;
             const matchedTitle = !shortKeyword && titleLower.includes(keywordLower);
             const matchedProcess = processLower.includes(keywordLower);
 

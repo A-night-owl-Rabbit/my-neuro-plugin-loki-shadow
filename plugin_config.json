@@ -1,26 +1,33 @@
 {
+  "enabled": {
+    "title": "启用插件",
+    "description": "是否启用洛基之影游戏陪玩插件",
+    "type": "bool",
+    "default": true,
+    "value": true
+  },
   "guide_library_path": {
     "title": "游戏攻略库路径",
-    "description": "游戏攻略库目录。默认使用插件目录下的 game-guides。支持社区共建 txt 攻略库分享计划：请按一份攻略一个 .txt 文件的方式补充内容，提交后可被所有使用者共享，人人为我，我为人人。",
+    "description": "本地游戏攻略库的绝对路径，攻略文件将保存到此目录",
     "type": "string",
     "default": "./game-guides",
-    "value": ""
+    "value": "./game-guides"
   },
   "sub_agent": {
     "title": "主智能体配置 (DeepSeek)",
-    "description": "负责攻略分析、内容整合、答案生成的主 LLM",
+    "description": "负责攻略分析、内容整合、答案生成的主LLM",
     "type": "object",
     "fields": {
       "api_key": {
         "title": "API Key",
-        "description": "API Key（勿提交到公开仓库）",
+        "description": "硅基流动 API Key",
         "type": "string",
         "default": "",
         "value": ""
       },
       "api_url": {
         "title": "API 地址",
-        "description": "OpenAI 兼容 API 基础地址",
+        "description": "硅基流动 API 基础地址",
         "type": "string",
         "default": "https://api.siliconflow.cn/v1",
         "value": "https://api.siliconflow.cn/v1"
@@ -40,8 +47,8 @@
         "value": 0.3
       },
       "max_tokens": {
-        "title": "最大 Token 数",
-        "description": "单次请求最大生成 Token 数",
+        "title": "最大Token数",
+        "description": "单次请求最大生成Token数",
         "type": "int",
         "default": 20000,
         "value": 20000
@@ -50,19 +57,19 @@
   },
   "fallback_agent": {
     "title": "后备智能体配置 (Qwen)",
-    "description": "主 Agent 失败时自动切换的后备 LLM",
+    "description": "主Agent失败时自动切换的后备LLM，使用Qwen大模型",
     "type": "object",
     "fields": {
       "api_key": {
         "title": "API Key",
-        "description": "可与主 Agent 共用同一 Key",
+        "description": "硅基流动 API Key（可与主Agent共用）",
         "type": "string",
         "default": "",
         "value": ""
       },
       "api_url": {
         "title": "API 地址",
-        "description": "OpenAI 兼容 API 基础地址",
+        "description": "硅基流动 API 基础地址",
         "type": "string",
         "default": "https://api.siliconflow.cn/v1",
         "value": "https://api.siliconflow.cn/v1"
@@ -82,8 +89,8 @@
         "value": 0.3
       },
       "max_tokens": {
-        "title": "最大 Token 数",
-        "description": "单次请求最大生成 Token 数",
+        "title": "最大Token数",
+        "description": "单次请求最大生成Token数",
         "type": "int",
         "default": 20000,
         "value": 20000
@@ -98,38 +105,66 @@
     "value": 1
   },
   "bilibili_search_limit": {
-    "title": "B 站搜索数量",
-    "description": "B 站视频搜索返回的结果数量",
+    "title": "B站搜索数量",
+    "description": "B站视频搜索返回的结果数量",
     "type": "int",
     "default": 3,
     "value": 3
   },
-  "taptap_search_limit": {
-    "title": "TapTap 搜索数量",
-    "description": "TapTap 攻略搜索返回的数量上限",
-    "type": "int",
-    "default": 1,
-    "value": 1
-  },
-  "nga_search_limit": {
-    "title": "NGA 搜索数量",
-    "description": "NGA 论坛攻略搜索返回的数量上限",
-    "type": "int",
-    "default": 1,
-    "value": 1
-  },
-  "miyoushe_search_limit": {
-    "title": "米游社搜索数量",
-    "description": "米游社攻略搜索返回的数量上限（仅米哈游系游戏有效）",
-    "type": "int",
-    "default": 1,
-    "value": 1
-  },
   "max_content_length": {
     "title": "内容最大长度",
-    "description": "发送给智能体的单个文档最大字符数，防止 Token 超限",
+    "description": "发送给智能体的单个文档最大字符数，防止token超限",
     "type": "int",
-    "default": 20000,
-    "value": 20000
+    "default": 40000,
+    "value": 40000
+  },
+  "per_source_context_chars": {
+    "title": "每个来源送入DeepSeek的字符上限",
+    "description": "combineAndSummarize 时每个来源允许输入的最大字符数。提升后B站长转录/游民星空长攻略中的具体剧情段落不会被截断，代价是输入token消耗增大。建议 15000-30000。",
+    "type": "int",
+    "default": 25000,
+    "value": 25000
+  },
+  "vector_top_k": {
+    "title": "向量召回数量",
+    "description": "向量语义召回返回的候选数量上限，建议 3-8",
+    "type": "int",
+    "default": 5,
+    "value": 5
+  },
+  "vector_api_key": {
+    "title": "向量API Key",
+    "description": "硅基流动 API Key，用于调用 Qwen/Qwen3-Embedding-8B",
+    "type": "string",
+    "default": "",
+    "value": ""
+  },
+  "vector_api_url": {
+    "title": "向量API地址",
+    "description": "硅基流动 API 基础地址",
+    "type": "string",
+    "default": "https://api.siliconflow.cn/v1",
+    "value": "https://api.siliconflow.cn/v1"
+  },
+  "vector_model_name": {
+    "title": "向量模型名称",
+    "description": "硅基流动 Embedding 模型名，例如 Qwen/Qwen3-Embedding-8B",
+    "type": "string",
+    "default": "Qwen/Qwen3-Embedding-8B",
+    "value": "Qwen/Qwen3-Embedding-8B"
+  },
+  "session_context_ttl_ms": {
+    "title": "内存中游戏状态有效期(毫秒)",
+    "description": "超过该时间未调用 track 则清空内存槽位；持久化文件仍保留。可增大以降低「换场景丢状态」感，默认 60000（1 分钟）",
+    "type": "int",
+    "default": 60000,
+    "value": 60000
+  },
+  "enable_cross_session_memory": {
+    "title": "启用跨会话记忆",
+    "description": "在攻略库目录写入 .loki-shadow-persist.json，按游戏名恢复任务槽位与剧透偏好（下次启动或切游戏时生效）",
+    "type": "bool",
+    "default": true,
+    "value": true
   }
 }

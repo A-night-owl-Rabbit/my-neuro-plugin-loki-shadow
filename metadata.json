@@ -1,9 +1,8 @@
 {
   "name": "loki-shadow",
   "displayName": "洛基之影",
-  "version": "2.1.0",
+  "version": "2.4.2",
   "author": "爱熬夜的人形兔",
-  "description": "游戏陪玩智能插件v2：优先检索社区共建 txt 攻略库，再并行整合游民星空/B站/TapTap/NGA/米游社内容，适合低剧透陪玩与攻略辅助",
-  "main": "index.js",
-  "lang": "js"
+  "description": "游戏陪玩插件：自动检测游戏、本地攻略库 + 游民星空/B站/网络搜索并行拉取，DeepSeek 主 Agent + Qwen 后备；分层任务追踪、来源门控、跨会话轻量持久化与剧透偏好。已移除剧情被动注入与 characters 角色栏追踪，强化内部决策禁止外显。",
+  "main": "index.js"
 }
