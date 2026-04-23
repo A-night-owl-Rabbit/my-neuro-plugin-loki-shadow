@@ -198,6 +198,15 @@ npm install axios cheerio
 
 ## 版本记录（节选）
 
+<!-- 2.4.2 sync marker v20260423 -->
+### 2.4.2（2026-04-23 同步自维护端）
+
+- 移除 **characters 角色栏** 追踪，降低其对搜索意图改写与作用域判断的干扰。  
+- 2.4.1 起：已移除**剧情被动注入**到系统提示的机制；强化主对话硬约束，**禁止在可见回复中**外显内部决策/提纲/陪玩小抄类元信息。  
+- 2.3.x 起：跨会话文件 .loki-shadow-persist.json、剧透/任务偏好、对 game_name 的校验与向量辅助检索等（更完整的演进说明见插件 index.js 头部与 metadata.json）。
+
+本提交中的「plugin_config.json」为**脱敏公开模板**（**不含** API Key、**不含** 个人本机绝对路径；未包含 .vector-cache 与仅本地调试用 test-query.js）。
+
 ### 2.0.1
 
 - 修复 UTF-8 BOM 问题
