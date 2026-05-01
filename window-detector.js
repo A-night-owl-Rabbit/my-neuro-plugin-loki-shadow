@@ -82,9 +82,9 @@ async function getForegroundWindowProcess() {
         'if ($hwnd -eq [IntPtr]::Zero) { return }',
         '$title = New-Object System.Text.StringBuilder 1024',
         '[void][Win32]::GetWindowText($hwnd, $title, $title.Capacity)',
-        '$pid = 0',
-        '[void][Win32]::GetWindowThreadProcessId($hwnd, [ref]$pid)',
-        '$proc = Get-Process -Id $pid -ErrorAction SilentlyContinue',
+        '$procId = 0',
+        '[void][Win32]::GetWindowThreadProcessId($hwnd, [ref]$procId)',
+        '$proc = Get-Process -Id $procId -ErrorAction SilentlyContinue',
         'if (-not $proc) { return }',
         '[pscustomobject]@{ ProcessName = $proc.ProcessName; MainWindowTitle = $title.ToString() } | ConvertTo-Json -Compress'
     ].join('; '), 5000);

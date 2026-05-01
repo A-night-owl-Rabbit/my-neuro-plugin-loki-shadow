@@ -1,11 +1,7 @@
 {
   "name": "loki-shadow-plugin",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "Loki Shadow 插件本地依赖（仅本目录）",
-  "dependencies": {
-    "@xenova/transformers": "^2.17.2",
-    "axios": "^1.9.0",
-    "cheerio": "^1.2.0"
-  }
+  "description": "Loki Shadow 插件本地依赖（v3.0.0 起检索一站式委托给 kimi-search，本插件不再需要爬虫/向量等本地依赖）",
+  "dependencies": {}
 }

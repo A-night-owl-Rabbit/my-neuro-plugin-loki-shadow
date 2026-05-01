@@ -6,153 +6,6 @@
     "default": true,
     "value": true
   },
-  "guide_library_path": {
-    "title": "游戏攻略库路径",
-    "description": "本地游戏攻略库的绝对路径，攻略文件将保存到此目录",
-    "type": "string",
-    "default": "./game-guides",
-    "value": "./game-guides"
-  },
-  "sub_agent": {
-    "title": "主智能体配置 (DeepSeek)",
-    "description": "负责攻略分析、内容整合、答案生成的主LLM",
-    "type": "object",
-    "fields": {
-      "api_key": {
-        "title": "API Key",
-        "description": "硅基流动 API Key",
-        "type": "string",
-        "default": "",
-        "value": ""
-      },
-      "api_url": {
-        "title": "API 地址",
-        "description": "硅基流动 API 基础地址",
-        "type": "string",
-        "default": "https://api.siliconflow.cn/v1",
-        "value": "https://api.siliconflow.cn/v1"
-      },
-      "model": {
-        "title": "模型名称",
-        "description": "主智能体使用的模型",
-        "type": "string",
-        "default": "deepseek-ai/DeepSeek-V3.2",
-        "value": "deepseek-ai/DeepSeek-V3.2"
-      },
-      "temperature": {
-        "title": "生成温度",
-        "description": "越低越精确，建议 0.2-0.5",
-        "type": "float",
-        "default": 0.3,
-        "value": 0.3
-      },
-      "max_tokens": {
-        "title": "最大Token数",
-        "description": "单次请求最大生成Token数",
-        "type": "int",
-        "default": 20000,
-        "value": 20000
-      }
-    }
-  },
-  "fallback_agent": {
-    "title": "后备智能体配置 (Qwen)",
-    "description": "主Agent失败时自动切换的后备LLM，使用Qwen大模型",
-    "type": "object",
-    "fields": {
-      "api_key": {
-        "title": "API Key",
-        "description": "硅基流动 API Key（可与主Agent共用）",
-        "type": "string",
-        "default": "",
-        "value": ""
-      },
-      "api_url": {
-        "title": "API 地址",
-        "description": "硅基流动 API 基础地址",
-        "type": "string",
-        "default": "https://api.siliconflow.cn/v1",
-        "value": "https://api.siliconflow.cn/v1"
-      },
-      "model": {
-        "title": "模型名称",
-        "description": "后备智能体使用的模型",
-        "type": "string",
-        "default": "Qwen/Qwen3.5-397B-A17B",
-        "value": "Qwen/Qwen3.5-397B-A17B"
-      },
-      "temperature": {
-        "title": "生成温度",
-        "description": "越低越精确，建议 0.2-0.5",
-        "type": "float",
-        "default": 0.3,
-        "value": 0.3
-      },
-      "max_tokens": {
-        "title": "最大Token数",
-        "description": "单次请求最大生成Token数",
-        "type": "int",
-        "default": 20000,
-        "value": 20000
-      }
-    }
-  },
-  "gamersky_download_limit": {
-    "title": "游民星空下载数量",
-    "description": "每次从游民星空下载的攻略数量上限",
-    "type": "int",
-    "default": 1,
-    "value": 1
-  },
-  "bilibili_search_limit": {
-    "title": "B站搜索数量",
-    "description": "B站视频搜索返回的结果数量",
-    "type": "int",
-    "default": 3,
-    "value": 3
-  },
-  "max_content_length": {
-    "title": "内容最大长度",
-    "description": "发送给智能体的单个文档最大字符数，防止token超限",
-    "type": "int",
-    "default": 40000,
-    "value": 40000
-  },
-  "per_source_context_chars": {
-    "title": "每个来源送入DeepSeek的字符上限",
-    "description": "combineAndSummarize 时每个来源允许输入的最大字符数。提升后B站长转录/游民星空长攻略中的具体剧情段落不会被截断，代价是输入token消耗增大。建议 15000-30000。",
-    "type": "int",
-    "default": 25000,
-    "value": 25000
-  },
-  "vector_top_k": {
-    "title": "向量召回数量",
-    "description": "向量语义召回返回的候选数量上限，建议 3-8",
-    "type": "int",
-    "default": 5,
-    "value": 5
-  },
-  "vector_api_key": {
-    "title": "向量API Key",
-    "description": "硅基流动 API Key，用于调用 Qwen/Qwen3-Embedding-8B",
-    "type": "string",
-    "default": "",
-    "value": ""
-  },
-  "vector_api_url": {
-    "title": "向量API地址",
-    "description": "硅基流动 API 基础地址",
-    "type": "string",
-    "default": "https://api.siliconflow.cn/v1",
-    "value": "https://api.siliconflow.cn/v1"
-  },
-  "vector_model_name": {
-    "title": "向量模型名称",
-    "description": "硅基流动 Embedding 模型名，例如 Qwen/Qwen3-Embedding-8B",
-    "type": "string",
-    "default": "Qwen/Qwen3-Embedding-8B",
-    "value": "Qwen/Qwen3-Embedding-8B"
-  },
   "session_context_ttl_ms": {
     "title": "内存中游戏状态有效期(毫秒)",
     "description": "超过该时间未调用 track 则清空内存槽位；持久化文件仍保留。可增大以降低「换场景丢状态」感，默认 60000（1 分钟）",
@@ -162,9 +15,30 @@
   },
   "enable_cross_session_memory": {
     "title": "启用跨会话记忆",
-    "description": "在攻略库目录写入 .loki-shadow-persist.json，按游戏名恢复任务槽位与剧透偏好（下次启动或切游戏时生效）",
+    "description": "在 persist_dir 目录写入 .loki-shadow-persist.json，按游戏名恢复任务槽位与剧透偏好（下次启动或切游戏时生效）",
     "type": "bool",
     "default": true,
     "value": true
+  },
+  "persist_dir": {
+    "title": "跨会话记忆存放目录",
+    "description": "跨会话记忆文件 .loki-shadow-persist.json 的存放目录。留空则使用插件目录下的 .runtime/。注意 Windows 路径需转义反斜杠。",
+    "type": "string",
+    "default": "",
+    "value": ""
+  },
+  "kimi_silent": {
+    "title": "Kimi 屏蔽搜索过程",
+    "description": "调用 kimi_web_search 时是否传 silent=true（屏蔽 Kimi 搜索/思考的中间输出，只返回最终答案）。一般保持开启以保证答案干净。",
+    "type": "bool",
+    "default": true,
+    "value": true
+  },
+  "kimi_deep_research": {
+    "title": "Kimi 默认启用探索版",
+    "description": "调用 kimi_web_search 时是否默认 deep_research=true（启用 Kimi 探索版，更慢但更全面）。普通查询保持 false 即可，主对话模型在需要深度调研时可绕过此默认值直接调用 kimi_web_search。",
+    "type": "bool",
+    "default": false,
+    "value": false
   }
 }

@@ -1,3 +1,18 @@
 # Runtime / local (not for distribution)
+.runtime/
+.runtime
+.loki-shadow-persist.json
 .vector-cache
 *.log
+
+# v3.0 起插件无运行时依赖，不再 vendor node_modules
+node_modules/
+
+# 编辑器 / 系统临时文件
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 调试脚本（仅本地）
+test-query.js
