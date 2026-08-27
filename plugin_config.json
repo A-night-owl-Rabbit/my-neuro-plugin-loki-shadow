@@ -8,7 +8,7 @@
   },
   "session_context_ttl_ms": {
     "title": "内存中游戏状态有效期(毫秒)",
-    "description": "超过该时间未调用 track 则清空内存槽位；持久化文件仍保留。可增大以降低「换场景丢状态」感，默认 60000（1 分钟）",
+    "description": "仅作用于易变槽位 current_step / current_boss / current_area：超过该时间未通过 track 写入则读取时被屏蔽（视为 null）。main_quest 与 current_chapter 不受此 TTL 影响，只有 track 显式写入新值、章节级联清除或切换游戏 reset 时才会变更。可增大以降低「换场景丢易变状态」感，默认 60000（1 分钟）。",
     "type": "int",
     "default": 60000,
     "value": 60000
@@ -22,23 +22,58 @@
   },
   "persist_dir": {
     "title": "跨会话记忆存放目录",
-    "description": "跨会话记忆文件 .loki-shadow-persist.json 的存放目录。留空则使用插件目录下的 .runtime/。注意 Windows 路径需转义反斜杠。",
+    "description": "跨会话记忆文件 .loki-shadow-persist.json 的存放目录。留空则用插件目录下的 .runtime/。在设置面板里直接填普通 Windows 路径即可。",
     "type": "string",
     "default": "",
     "value": ""
   },
+  "search_engine": {
+    "title": "联网检索引擎",
+    "description": "loki_shadow_query 委托给哪个引擎完成联网搜索：kimi=调用 kimi-search 插件的 kimi_web_search（一站式总结快、适合实时新闻/简单问答）；glm=调用 glm-search 插件的 glm_web_search（智谱清言 GLM-5.1 + 沉思模型，擅长长文档/多源对比/深度调研）。需要确保对应插件已在 enabled_plugins.json 启用。",
+    "type": "string",
+    "enum": [
+      "kimi",
+      "glm"
+    ],
+    "default": "kimi",
+    "value": "kimi"
+  },
   "kimi_silent": {
-    "title": "Kimi 屏蔽搜索过程",
-    "description": "调用 kimi_web_search 时是否传 silent=true（屏蔽 Kimi 搜索/思考的中间输出，只返回最终答案）。一般保持开启以保证答案干净。",
+    "title": "Kimi 屏蔽搜索过程（仅 search_engine=kimi 生效）",
+    "description": "调用 kimi_web_search 时是否传 silent=true（屏蔽 Kimi 搜索/思考的中间输出，只返回最终答案）。一般保持开启以保证答案干净。GLM 引擎默认就只返回最终答案，无需此参数。",
     "type": "bool",
     "default": true,
     "value": true
   },
   "kimi_deep_research": {
-    "title": "Kimi 默认启用探索版",
+    "title": "Kimi 默认启用探索版（仅 search_engine=kimi 生效）",
     "description": "调用 kimi_web_search 时是否默认 deep_research=true（启用 Kimi 探索版，更慢但更全面）。普通查询保持 false 即可，主对话模型在需要深度调研时可绕过此默认值直接调用 kimi_web_search。",
     "type": "bool",
     "default": false,
     "value": false
+  },
+  "glm_deep_research": {
+    "title": "GLM 默认启用沉思模式（仅 search_engine=glm 生效）",
+    "description": "调用 glm_web_search 时是否默认 deep_research=true（启用 GLM 沉思模型，多次联网检索 + 整合长篇结构化报告，1-5 分钟）。陪玩场景一般保持 false（普通模式 10-30 秒回答），仅在用户要求深度剧情研究时手动开启。",
+    "type": "bool",
+    "default": false,
+    "value": true
+  },
+  "game_aliases": {
+    "title": "游戏别名映射(JSON)",
+    "description": "用于补充自动识别不到的小众/同人/汉化游戏。填写 JSON 数组，每项格式：{\"gameName\":\"LimeLight Lemonade Jam\",\"processNames\":[\"limelight_lj\"],\"windowTitles\":[\"LimeLight Lemonade Jam\"]}。当内置识别失败时，会优先用这些规则把前台窗口映射成正式游戏名。",
+    "type": "json",
+    "default": [],
+    "value": [
+      {
+        "gameName": "LimeLight Lemonade Jam",
+        "processNames": [
+          "limelight_lj"
+        ],
+        "windowTitles": [
+          "LimeLight Lemonade Jam"
+        ]
+      }
+    ]
   }
 }

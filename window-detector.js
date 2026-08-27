@@ -104,7 +104,7 @@ async function getForegroundWindowProcess() {
  * @returns {Promise<{detected: boolean, gameName: string|null, windowTitle: string|null, allWindows: Array}>}
  */
 async function detectCurrentGame() {
-    return detectCurrentGameWithOptions();
+    return detectCurrentGameWithOptions({ preferForeground: true });
 }
 
 function normalizeText(value = '') {
@@ -207,6 +207,7 @@ function detectGameFromProcesses(processes) {
 
 async function detectCurrentGameWithOptions(options = {}) {
     const forceRefresh = options.forceRefresh === true;
+    const preferForeground = options.preferForeground !== false;
     const now = Date.now();
 
     if (!forceRefresh && cachedDetection && (now - cachedDetection.timestamp < DETECTION_CACHE_MS)) {
@@ -217,15 +218,53 @@ async function detectCurrentGameWithOptions(options = {}) {
         };
     }
 
+    let foregroundWindow = null;
+    let foregroundMatch = null;
+    if (preferForeground) {
+        try {
+            foregroundWindow = await getForegroundWindowProcess();
+            if (foregroundWindow) {
+                foregroundMatch = detectGameFromProcesses([foregroundWindow]);
+                if (foregroundMatch.detected) {
+                    const result = {
+                        ...foregroundMatch,
+                        allWindows: [foregroundWindow],
+                        foregroundWindow,
+                        detectionSource: 'foreground',
+                        cacheHit: false,
+                        cacheAgeMs: 0
+                    };
+                    cachedDetection = {
+                        timestamp: now,
+                        value: result
+                    };
+                    return result;
+                }
+            }
+        } catch (_) {
+            foregroundWindow = null;
+            foregroundMatch = null;
+        }
+    }
+
     const processes = await getWindowProcesses();
     const result = detectGameFromProcesses(processes);
+    const mergedWindows = foregroundWindow
+        ? [foregroundWindow, ...processes.filter(proc => !(proc.processName === foregroundWindow.processName && proc.windowTitle === foregroundWindow.windowTitle))]
+        : processes;
+    const finalResult = {
+        ...result,
+        allWindows: mergedWindows,
+        foregroundWindow,
+        detectionSource: result.detected ? 'window-scan' : (foregroundWindow ? 'foreground+window-scan' : 'window-scan')
+    };
 
     cachedDetection = {
         timestamp: now,
-        value: result
+        value: finalResult
     };
 
-    return result;
+    return finalResult;
 }
 
 module.exports = {

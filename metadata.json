@@ -1,8 +1,8 @@
 {
   "name": "loki-shadow",
   "displayName": "洛基之影",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "author": "爱熬夜的人形兔",
-  "description": "游戏陪玩插件：自动检测游戏窗口 + 跨会话记忆 + 状态追踪（loki_shadow_track）。攻略检索一站式委托给 kimi-search 暴露的 kimi_web_search（Kimi 联网 AI 搜索），速度快、答案完整。保留陪玩/防剧透协议与节奏控制。v3.0.0 起移除本地攻略库、向量召回、游民星空/B站/多源网络搜索、sub-agent 双 LLM 体系。",
+  "description": "游戏陪玩插件：自动检测游戏窗口 + 跨会话记忆 + 状态追踪（loki_shadow_track）。攻略检索一站式委托给 kimi-search 或 glm-search（v3.1 起可在 search_engine 配置项里切换：kimi=Kimi 一站式快总结，glm=智谱清言 GLM-5.1 长文档深度分析）。保留陪玩/防剧透协议与节奏控制。",
   "main": "index.js"
 }

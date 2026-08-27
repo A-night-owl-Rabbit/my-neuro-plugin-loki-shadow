@@ -1,11 +1,18 @@
 /**
- * 洛基之影 (Shadow of Loki) - 游戏陪玩智能插件 v3.0.0
+ * 洛基之影 (Shadow of Loki) - 游戏陪玩智能插件 v3.1.0
+ *
+ * v3.1.0 (引擎可切换)：
+ *   - 新增 search_engine 配置项：kimi / glm
+ *     · kimi → 调用 kimi-search 暴露的 kimi_web_search（Kimi 一站式快总结）
+ *     · glm  → 调用 glm-search 暴露的 glm_web_search（智谱清言 GLM-5.1 / 沉思模型）
+ *   - GLM 引擎不支持 silent 参数，glm_deep_research 与 kimi_deep_research 各自独立配置
+ *   - 错误检测、日志、回包 header/tail 文案均按当前引擎动态适配
  *
  * v3.0.0 (检索引擎换骨)：
  *   - 移除本地攻略库 / 向量召回 / 游民星空 / B站 / 多源网络搜索
  *   - 移除 sub-agent (DeepSeek/Qwen) 双 LLM 整合体系
- *   - loki_shadow_query 一站式委托给 kimi-search 暴露的 kimi_web_search 工具
- *   - 发给 Kimi 的 query 极简化：仅 "游戏名 + 原始问题"，让 Kimi 全力召回；
+ *   - loki_shadow_query 一站式委托给外部联网搜索工具
+ *   - 发给搜索引擎的 query 极简化：默认仅 "游戏名 + 原始问题"，若已记录主线任务则自动附带 "主线任务：任务名" 作为上下文，全力召回；
  *     防剧透 / 进度感知交给主对话模型在收到答案后按 onLLMRequest 注入的协议处理
  *   - 保留：游戏窗口检测、track 状态追踪、跨会话记忆、game-name 守卫、陪玩/防剧透协议注入
  *
@@ -13,10 +20,10 @@
  *   v2.4.2 移除 characters 角色栏追踪
  *   v2.4.1 移除剧情被动注入
  *   v2.3.x 跨会话持久化、剧透偏好
- *   v2.2   多源并行（已被 Kimi 一站式取代）
+ *   v2.2   多源并行（已被一站式引擎取代）
  *
  * 作者：爱熬夜的人形兔
- * 版本：3.0.0
+ * 版本：3.1.0
  */
 
 const path = require('path');
@@ -26,6 +33,32 @@ const { getGameSnapshot, saveGameSnapshot } = require('./persist-store');
 const { getTrackGameNameRejection } = require('./game-name-guard');
 const { detectCurrentGame } = require('./window-detector');
 const { LokiLogger } = require('./logger');
+const { isSceneRoutingEnabled } = require('../../../js/ai/scene-routing-service.js');
+
+const WINDOW_TITLE_CLEANUPS = [
+    /\s*[-|｜丨·•]+\s*(?:visual novel|galgame|steam|unity|unreal engine)\s*$/i,
+    /\s*\[[^\]]+\]\s*$/,
+    /^\s*playing\s*[:-]\s*/i,
+    /^\s*now\s*playing\s*[:-]\s*/i
+];
+
+// 引擎元数据：把 kimi/glm 的差异集中在这里，业务代码只看 _engineMeta()
+const ENGINE_META = {
+    kimi: {
+        label: 'Kimi',
+        toolName: 'kimi_web_search',
+        // Kimi 错误回包；含 HTTP/插件错误、合规拒答、以及 200 正文的「人太多/累了/晚点再问」类繁忙限流话术
+        errorPattern: /^错误：|Kimi 认证失败|Kimi 限流|无法连接到 Kimi|Kimi 联网搜索失败|\[Kimi 返回了空内容|内容由于不合规|不合规被停止|被停止生成|换个话题吧|安全策略|内容审核未通过|无法回答该问题|和\s*Kimi\s*聊的人太多|聊的人太多了|Kimi\s*有点累了|晚点再问我|稍后再来问我/i,
+        emptyHint: 'Kimi 返回空内容'
+    },
+    glm: {
+        label: 'GLM',
+        toolName: 'glm_web_search',
+        // GLM 错误回包前缀（来自 glm-search/index.js _formatError）
+        errorPattern: /^错误：|GLM 认证失败|GLM 限流|GLM 模型不存在|无法连接到 GLM-Free-API|GLM 联网搜索失败|\[GLM 返回了空内容/,
+        emptyHint: 'GLM 返回空内容'
+    }
+};
 
 class LokiShadowPlugin extends Plugin {
 
@@ -42,9 +75,10 @@ class LokiShadowPlugin extends Plugin {
         this._loadConfig();
         const ttl = this._config.session_context_ttl_ms ?? 60000;
         this._sessionCtx = new GameSessionContext(5, ttl);
+        const meta = this._engineMeta();
         this.context.log(
             'info',
-            `洛基之影 v3.0.0 初始化完成 | 检索引擎=Kimi(kimi_web_search) | 会话TTL=${ttl}ms | 跨会话记忆=${this._config.enable_cross_session_memory !== false ? '开' : '关'}`
+            `洛基之影 v3.1.0 初始化完成 | 检索引擎=${meta.label}(${meta.toolName}) | 会话TTL=${ttl}ms | 跨会话记忆=${this._config.enable_cross_session_memory !== false ? '开' : '关'}`
         );
     }
 
@@ -53,7 +87,8 @@ class LokiShadowPlugin extends Plugin {
         if (!this._config) this._loadConfig();
 
         if (this._config) {
-            this.context.log('info', '洛基之影已启动 | 检索一站式委托给 kimi_web_search');
+            const meta = this._engineMeta();
+            this.context.log('info', `洛基之影已启动 | 检索一站式委托给 ${meta.toolName}`);
             if (this._config.enable_cross_session_memory !== false) {
                 this.context.log(
                     'info',
@@ -63,22 +98,36 @@ class LokiShadowPlugin extends Plugin {
         }
     }
 
+    _engineMeta() {
+        const key = (this._config && this._config.search_engine) || 'kimi';
+        return ENGINE_META[key] || ENGINE_META.kimi;
+    }
+
     async onLLMRequest(request) {
         if (!this._pluginConfig.enabled) return;
         if (!this._config) return;
+        if (isSceneRoutingEnabled(this.context.getConfig())) return;
 
         const sysMsg = request.messages.find(m => m.role === 'system');
         if (!sysMsg) return;
 
-        const injection = `
+        sysMsg.content += `\n\n${this._buildSceneProtocol()}`;
+    }
 
-【洛基之影 · 游戏陪玩系统 - 行为协议】
+    _buildSceneProtocol() {
+        const meta = this._engineMeta();
+        const engineSummary = meta.label === 'Kimi'
+            ? 'Kimi 联网 AI 搜索一站式获取答案，速度快、答案完整'
+            : '智谱清言 GLM-5.1 联网搜索一站式获取答案，擅长长文档、多源对比、深度剧情分析';
+
+        return `【洛基之影 · 游戏陪玩系统 - 行为协议】
 你拥有游戏陪玩后端"洛基之影"(loki_shadow_track / loki_shadow_query)。
-loki_shadow_query 内部已自动委托给 Kimi 联网 AI 搜索一站式获取答案，速度快、答案完整。
+loki_shadow_query 内部已自动委托给 ${engineSummary}。
 
 ■ 启用条件
 - 当前截图存在游戏UI证据（任务栏、HUD、地图、角色面板）或最近60秒窗口/进程命中已知游戏时，进入陪玩模式。
 - 每次基于当前截图判断，不要场景惯性；但窗口核验命中同一游戏时，过场CG优先视为游戏内画面。
+- 用户明确说出正在玩的作品（如“我在玩刺客信条”）时，先以 source=user_confirmed 同步一次作品名；这不是截图证据，不能据此编造任务、章节、地点或画面。
 - 视频网站/播放器/直播画面且无游戏进程佐证时，不启用陪玩模式。
 - game_name 只能是游戏作品正式名称，禁止填应用/平台名。
 
@@ -87,11 +136,12 @@ loki_shadow_query 内部已自动委托给 Kimi 联网 AI 搜索一站式获取�
 ⚠️ 禁止把NPC对话原文、旁白直接当query，必须转化为结构化关键词。
 
 ■ 状态追踪核心原则
-- 确认是游戏场景时应调用 track；非游戏场景或无法确定作品名时不要 track。
+- 每个顶层用户输入或主动触发中，针对同一张截图/同一游戏状态最多成功调用一次 loki_shadow_track；如果本轮已经收到成功的追踪结果，就不要再次调用，直接依据结果回复。只有取得新截图且状态确实变化时，才允许再次更新；非游戏场景或无法确定作品名时不要 track。
+- 用户明确确认“我在玩/我玩这个 <游戏名>”而当前没有截图或窗口证据时，也要用 game_name 和 source=user_confirmed 轻量同步一次；只记录作品名，不填 main_quest、current_step、current_area、current_chapter，也不因此调用 query。
 - main_quest 严格管控：只接受 screenshot 和 user_confirmed 来源，讨论剧情角色不等于任务变了，不确定就不要传。
 - current_chapter：截图中看到章节信息时必须填写，看不到可不填。章节信息对系统追踪进度很重要。
 - 讨论剧情角色时，只更新 current_step（记录具体情节推进），绝不动 main_quest。
-- track 和 query 独立：track 不触发搜索；query 也不是每轮必调，只有你真的有明确问题时才调用。各字段详见工具参数说明。
+- track 和 query 独立：track 只负责同步当前状态，不触发搜索；每个顶层轮次最多同步一次同一状态。query 通常由你判断，有明确问题才调用，不要当成每轮必做动作；但若本轮是心情系统发起的主动陪玩搭话，则应尽量调用 query（确无可查问题时才跳过）。
 
 ■ query 调用门槛
 - 先想清楚"你具体想知道什么"，再决定是否调用 loki_shadow_query。不要因为用户正在玩游戏，就把 query 当作每轮必做动作。
@@ -124,9 +174,32 @@ loki_shadow_query 内部已自动委托给 Kimi 联网 AI 搜索一站式获取�
 
 ■ 返回值处理
 - "status: no_reliable_info"：不要编造，切换为基于截图和对话的自然陪聊。
-- 若 loki_shadow_query 因 Kimi 服务异常返回失败提示，可以直接调用 kimi_web_search 工具自行联网，或基于画面/对话继续陪聊，绝不可硬编剧情。`;
+- 若 loki_shadow_query 因 ${meta.label} 服务异常返回失败提示，可以直接调用 ${meta.toolName} 工具自行联网，或基于画面/对话继续陪聊，绝不可硬编剧情。`;
+    }
 
-        sysMsg.content += injection;
+    getSceneCapability() {
+        return {
+            sceneId: 'GAME',
+            available: this._pluginConfig?.enabled === true && !!this._config,
+            protocol: this._buildSceneProtocol(),
+            tools: this.getTools(),
+            dynamicContext: '',
+            backgroundContext: '',
+            playbackActive: false
+        };
+    }
+
+    getLegacyScenePromptBlocks() {
+        if (!this._config) return [];
+        return [this._buildSceneProtocol()];
+    }
+
+    async onSceneEnter() {
+        this.context.log('info', '洛基之影已获得 GAME 主场景授权');
+    }
+
+    async onSceneExit() {
+        this.context.log('info', '洛基之影已退出 GAME 主场景授权，游戏进度保留');
     }
 
     getTools() {
@@ -173,19 +246,7 @@ loki_shadow_query 内部已自动委托给 Kimi 联网 AI 搜索一站式获取�
 
         const persistDir = this._config?.persist_dir;
         const persistOn = this._config?.enable_cross_session_memory !== false;
-
-        if (persistOn && persistDir) {
-            const switching = this._sessionCtx.currentGame && game_name !== this._sessionCtx.currentGame;
-            const coldStart = !this._sessionCtx.lastUpdateTime;
-            if (switching) {
-                this._sessionCtx.reset();
-                const snap = getGameSnapshot(persistDir, game_name);
-                if (snap) this._sessionCtx.hydrateFromSnapshot(snap);
-            } else if (coldStart) {
-                const snap = getGameSnapshot(persistDir, game_name);
-                if (snap) this._sessionCtx.hydrateFromSnapshot(snap);
-            }
-        }
+        this._ensureSessionContextForGame(game_name);
 
         const validSources = ['screenshot', 'conversation', 'user_confirmed'];
         const validSource = validSources.includes(source) ? source : 'conversation';
@@ -207,7 +268,9 @@ loki_shadow_query 内部已自动委托给 Kimi 联网 AI 搜索一站式获取�
         const status = this._sessionCtx.getStatusText();
         this.context.log('info', `洛基之影 状态追踪更新 | 游戏: ${game_name} | 来源: ${validSource} | ${status}`);
 
-        let result = `【洛基之影 · 状态已记录】${game_name} | ${status}`;
+        let result = `【洛基之影 · 当前画面锚点】${game_name} | ${status}`;
+        result += '\n请把这条记录当作本轮最新截图/当前游戏状态的优先事实。最终回复必须顺着这里的当前步骤说，不能沿用旧对话里已经过时的菜单、按钮、位置或任务判断。';
+        result += '\n本轮相同状态已经完成追踪，不要再次调用 loki_shadow_track；直接依据这条结果回复，或在确有具体问题时调用 loki_shadow_query。';
         if (warnings.length > 0) {
             result += '\n\n' + warnings.join('\n');
             this.context.log('warn', `洛基之影 追踪警告: ${warnings.join(' | ')}`);
@@ -243,9 +306,21 @@ loki_shadow_query 内部已自动委托给 Kimi 联网 AI 搜索一站式获取�
                     actualGameName = detection.gameName;
                     log.step('Step1:游戏检测', 'ok', `游戏: ${actualGameName} (窗口: ${detection.windowTitle})`);
                 } else {
-                    const winList = (detection.allWindows || []).map(w => w.windowTitle).slice(0, 5).join(', ');
-                    log.step('Step1:游戏检测', 'fail', `未匹配已知游戏；当前窗口: ${winList}`);
-                    return '【洛基之影】无法检测到当前正在运行的游戏。请在调用时指定 game_name 参数，例如：game_name="绝区零"';
+                    const configuredMatch = this._resolveConfiguredGameName(detection);
+                    if (configuredMatch) {
+                        actualGameName = configuredMatch.gameName;
+                        log.step('Step1:游戏检测', 'ok', `游戏: ${actualGameName} (${configuredMatch.matchedBy}: ${configuredMatch.matchedValue})`);
+                    } else {
+                        const guessedMatch = this._guessGameNameFromForegroundWindow(detection);
+                        if (guessedMatch) {
+                            actualGameName = guessedMatch.gameName;
+                            log.step('Step1:游戏检测', 'warn', `未命中已知游戏，回退使用前台窗口标题: ${actualGameName}`);
+                        } else {
+                            const winList = (detection.allWindows || []).map(w => w.windowTitle).slice(0, 5).join(', ');
+                            log.step('Step1:游戏检测', 'fail', `未匹配已知游戏；当前窗口: ${winList}`);
+                            return '【洛基之影】无法检测到当前正在运行的游戏。请在调用时指定 game_name 参数，例如：game_name="绝区零"';
+                        }
+                    }
                 }
             } catch (err) {
                 log.error('Step1:游戏检测', err);
@@ -255,59 +330,165 @@ loki_shadow_query 内部已自动委托给 Kimi 联网 AI 搜索一站式获取�
             log.step('Step1:游戏检测', 'ok', `用户指定: ${actualGameName}`);
         }
 
-        const composedQuery = this._composeKimiQuery(actualGameName, cleanQuery);
-        log.step('Step2:拼接query', 'ok', `"${composedQuery}"`);
+        this._ensureSessionContextForGame(actualGameName);
+        const currentScope = this._sessionCtx?.getCurrentScope?.() || {};
+        const composedQuery = this._composeQuery(actualGameName, cleanQuery, currentScope.mainQuest);
+        const questHint = currentScope.mainQuest ? ` | 主线任务: ${currentScope.mainQuest}` : '';
+        log.step('Step2:拼接query', 'ok', `"${composedQuery}"${questHint}`);
 
-        log.step('Step3:Kimi联网搜索', 'start',
-            `silent=${this._config.kimi_silent} | deep_research=${this._config.kimi_deep_research}`);
+        const meta = this._engineMeta();
+        const stepLabel = `Step3:${meta.label}联网搜索`;
+        const toolArgs = this._buildToolArgs(composedQuery);
+        const argsHint = Object.entries(toolArgs)
+            .filter(([k]) => k !== 'query')
+            .map(([k, v]) => `${k}=${v}`)
+            .join(' | ') || '(默认参数)';
+        log.step(stepLabel, 'start', argsHint);
 
         let answer;
         try {
             if (!global.pluginManager) {
-                throw new Error('pluginManager 不可用，无法调用 kimi_web_search');
+                throw new Error(`pluginManager 不可用，无法调用 ${meta.toolName}`);
             }
-            answer = await global.pluginManager.executeTool('kimi_web_search', {
-                query: composedQuery,
-                silent: this._config.kimi_silent,
-                deep_research: this._config.kimi_deep_research
-            });
+            answer = await global.pluginManager.executeTool(meta.toolName, toolArgs);
         } catch (err) {
-            log.error('Step3:Kimi联网搜索', err);
+            log.error(stepLabel, err);
             this._writeSummary(log);
-            return this._buildKimiFailureFallback(actualGameName, cleanQuery, err.message);
+            return this._buildFailureFallback(actualGameName, cleanQuery, err.message);
         }
 
-        const answerStr = this._normalizeKimiAnswer(answer);
+        const answerStr = this._normalizeAnswer(answer);
 
         if (!answerStr) {
-            log.step('Step3:Kimi联网搜索', 'fail', '返回空内容');
+            log.step(stepLabel, 'fail', '返回空内容');
             this._writeSummary(log);
-            return this._buildKimiFailureFallback(actualGameName, cleanQuery, 'Kimi 返回空内容');
+            return this._buildFailureFallback(actualGameName, cleanQuery, meta.emptyHint);
         }
 
-        if (this._looksLikeKimiError(answerStr)) {
-            log.step('Step3:Kimi联网搜索', 'fail', `Kimi 错误回包: ${answerStr.substring(0, 80)}`);
+        if (this._looksLikeEngineError(answerStr)) {
+            log.step(stepLabel, 'fail', `${meta.label} 错误回包: ${answerStr.substring(0, 80)}`);
             this._writeSummary(log);
-            return this._buildKimiFailureFallback(actualGameName, cleanQuery, answerStr);
+            return this._buildFailureFallback(actualGameName, cleanQuery, answerStr);
         }
 
-        log.step('Step3:Kimi联网搜索', 'ok', `答案长度: ${answerStr.length}`);
+        log.step(stepLabel, 'ok', `答案长度: ${answerStr.length}`);
         this._writeSummary(log);
 
-        const header = `【${actualGameName} · 洛基之影 · Kimi联网】\n原问题：${cleanQuery}`;
-        const tail = '【提示】以上由 Kimi 联网 AI 搜索整合，请按 spoiler_comfort 与玩家进度做防剧透处理后再转述给用户。';
+        const header = `【${actualGameName} · 洛基之影 · ${meta.label}联网】\n原问题：${cleanQuery}`;
+        const tail = `【提示】以上由 ${meta.label} 联网搜索整合，请按 spoiler_comfort 与玩家进度做防剧透处理后再转述给用户。`;
         return `${header}\n\n${answerStr}\n\n---\n${tail}`;
     }
 
-    _composeKimiQuery(gameName, query) {
-        const game = String(gameName || '').trim();
-        const q = String(query || '').trim();
-        if (!game) return q;
-        if (!q) return game;
-        return `${game} ${q}`;
+    _ensureSessionContextForGame(gameName) {
+        if (!gameName || !this._sessionCtx) return;
+
+        const switching = this._sessionCtx.currentGame && gameName !== this._sessionCtx.currentGame;
+        const coldStart = !this._sessionCtx.lastUpdateTime;
+        const persistDir = this._config?.persist_dir;
+        const persistOn = this._config?.enable_cross_session_memory !== false;
+        if (!persistOn || !persistDir) {
+            if (switching) {
+                this._sessionCtx.reset();
+            }
+            return;
+        }
+
+        if (switching) {
+            this._sessionCtx.reset();
+        }
+
+        if (switching || coldStart) {
+            const snap = getGameSnapshot(persistDir, gameName);
+            if (snap) this._sessionCtx.hydrateFromSnapshot(snap);
+        }
     }
 
-    _normalizeKimiAnswer(answer) {
+    _buildToolArgs(composedQuery) {
+        const engine = (this._config && this._config.search_engine) || 'kimi';
+        if (engine === 'glm') {
+            return {
+                query: composedQuery,
+                deep_research: this._config.glm_deep_research === true
+            };
+        }
+        return {
+            query: composedQuery,
+            silent: this._config.kimi_silent !== false,
+            deep_research: this._config.kimi_deep_research === true
+        };
+    }
+
+    _resolveConfiguredGameName(detection) {
+        const aliases = Array.isArray(this._config?.game_aliases) ? this._config.game_aliases : [];
+        if (!aliases.length || !detection) return null;
+
+        const candidates = [];
+        if (detection.foregroundWindow) candidates.push(detection.foregroundWindow);
+        if (Array.isArray(detection.allWindows)) candidates.push(...detection.allWindows);
+
+        for (const alias of aliases) {
+            if (!alias || !alias.gameName) continue;
+            const processPatterns = Array.isArray(alias.processNames) ? alias.processNames : [];
+            const titlePatterns = Array.isArray(alias.windowTitles) ? alias.windowTitles : [];
+
+            for (const proc of candidates) {
+                const processName = String(proc?.processName || '').trim().toLowerCase();
+                const windowTitle = String(proc?.windowTitle || '').trim().toLowerCase();
+                const processHit = processPatterns.some(pattern => processName && processName.includes(String(pattern || '').trim().toLowerCase()));
+                const titleHit = titlePatterns.some(pattern => windowTitle && windowTitle.includes(String(pattern || '').trim().toLowerCase()));
+                if (processHit || titleHit) {
+                    return {
+                        gameName: alias.gameName,
+                        matchedBy: processHit ? 'config.processName' : 'config.windowTitle',
+                        matchedValue: processHit ? proc.processName : proc.windowTitle,
+                        windowTitle: proc.windowTitle || '',
+                        processName: proc.processName || ''
+                    };
+                }
+            }
+        }
+
+        return null;
+    }
+
+    _guessGameNameFromForegroundWindow(detection) {
+        const foreground = detection?.foregroundWindow;
+        const rawTitle = String(foreground?.windowTitle || '').trim();
+        if (!rawTitle) return null;
+
+        let candidate = rawTitle;
+        for (const pattern of WINDOW_TITLE_CLEANUPS) {
+            candidate = candidate.replace(pattern, '').trim();
+        }
+        candidate = candidate.replace(/\s{2,}/g, ' ').trim();
+        if (!candidate) return null;
+        if (getTrackGameNameRejection(candidate)) return null;
+        if (/^[A-Za-z]:\\|^C:\\Windows\\|\.bat$|\.exe$/i.test(candidate)) return null;
+        if (candidate.length < 2) return null;
+
+        return {
+            gameName: candidate,
+            matchedBy: 'foreground.windowTitle',
+            matchedValue: rawTitle,
+            windowTitle: rawTitle,
+            processName: String(foreground?.processName || '').trim()
+        };
+    }
+
+    _composeQuery(gameName, query, mainQuest) {
+        const parts = [];
+        const game = String(gameName || '').trim();
+        const quest = String(mainQuest || '').trim();
+        const q = String(query || '').trim();
+
+        if (game) parts.push(game);
+        if (quest) parts.push(`主线任务：${quest}`);
+        if (q) parts.push(q);
+
+        return parts.join(' ');
+    }
+
+    _normalizeAnswer(answer) {
         if (!answer) return '';
         if (typeof answer === 'string') return answer.trim();
         if (typeof answer === 'object') {
@@ -317,10 +498,10 @@ loki_shadow_query 内部已自动委托给 Kimi 联网 AI 搜索一站式获取�
         return String(answer).trim();
     }
 
-    _looksLikeKimiError(text) {
+    _looksLikeEngineError(text) {
         if (!text || typeof text !== 'string') return false;
         const head = text.substring(0, 200);
-        return /^错误：|Kimi 认证失败|Kimi 限流|无法连接到 Kimi|Kimi 联网搜索失败|\[Kimi 返回了空内容/.test(head);
+        return this._engineMeta().errorPattern.test(head);
     }
 
     _writeSummary(log) {
@@ -332,14 +513,15 @@ loki_shadow_query 内部已自动委托给 Kimi 联网 AI 搜索一站式获取�
         }
     }
 
-    _buildKimiFailureFallback(gameName, query, reason) {
+    _buildFailureFallback(gameName, query, reason) {
+        const meta = this._engineMeta();
         const ctxSummary = this._sessionCtx?.getSummary?.() || '暂无有效游戏状态记录';
         return [
             '【洛基之影 · 未检索到可靠资料】',
             'status: no_reliable_info',
             `game_name: ${gameName}`,
             `query: ${query}`,
-            `reason: kimi_unavailable | ${String(reason || '').slice(0, 200)}`,
+            `reason: ${meta.label.toLowerCase()}_unavailable | ${String(reason || '').slice(0, 200)}`,
             '',
             '当前游戏上下文：',
             ctxSummary,
@@ -349,7 +531,7 @@ loki_shadow_query 内部已自动委托给 Kimi 联网 AI 搜索一站式获取�
             '2. 可以评论画面里的角色表情、场景氛围、战斗压力、演出张力',
             '3. 围绕用户刚提到的台词做低风险感受型回应',
             '4. 自然追问一句当前是在剧情对话、战斗还是跑图，不要连续盘问',
-            '5. 如果你直接掌握 kimi_web_search 工具，可以自行调用一次重试',
+            `5. 如果你直接掌握 ${meta.toolName} 工具，可以自行调用一次重试`,
             '',
             '安全陪聊方向：画面吐槽 / 战斗反馈 / 情绪共鸣 / 当前角色印象 / 任务进度确认'
         ].join('\n');
@@ -360,8 +542,11 @@ loki_shadow_query 内部已自动委托给 Kimi 联网 AI 搜索一站式获取�
             session_context_ttl_ms: 60000,
             enable_cross_session_memory: true,
             persist_dir: path.join(__dirname, '.runtime'),
+            search_engine: 'kimi',
             kimi_silent: true,
-            kimi_deep_research: false
+            kimi_deep_research: false,
+            glm_deep_research: false,
+            game_aliases: []
         };
 
         const _v = (val, def) => (val !== undefined && val !== null && val !== '') ? val : def;
@@ -371,6 +556,30 @@ loki_shadow_query 内部已自动委托给 Kimi 联网 AI 搜索一站式获取�
             if (val === 'false') return false;
             return def;
         };
+        const _vEngine = (val) => {
+            const s = String(val || '').toLowerCase().trim();
+            return (s === 'glm' || s === 'kimi') ? s : defaults.search_engine;
+        };
+        const _vJson = (val, def) => {
+            if (val === undefined || val === null || val === '') return def;
+            if (typeof val === 'object') return val;
+            try {
+                return JSON.parse(String(val));
+            } catch {
+                return def;
+            }
+        };
+        const _normalizeAliases = (val) => {
+            const parsed = _vJson(val, defaults.game_aliases);
+            if (!Array.isArray(parsed)) return defaults.game_aliases;
+            return parsed
+                .map(entry => ({
+                    gameName: String(entry?.gameName || '').trim(),
+                    processNames: Array.isArray(entry?.processNames) ? entry.processNames.map(v => String(v || '').trim()).filter(Boolean) : [],
+                    windowTitles: Array.isArray(entry?.windowTitles) ? entry.windowTitles.map(v => String(v || '').trim()).filter(Boolean) : []
+                }))
+                .filter(entry => entry.gameName && (entry.processNames.length || entry.windowTitles.length));
+        };
 
         try {
             const rawCfg = this._pluginConfig || {};
@@ -378,8 +587,11 @@ loki_shadow_query 内部已自动委托给 Kimi 联网 AI 搜索一站式获取�
                 session_context_ttl_ms: parseInt(_v(rawCfg.session_context_ttl_ms, defaults.session_context_ttl_ms), 10) || defaults.session_context_ttl_ms,
                 enable_cross_session_memory: _vBool(rawCfg.enable_cross_session_memory, defaults.enable_cross_session_memory),
                 persist_dir: _v(rawCfg.persist_dir, defaults.persist_dir),
+                search_engine: _vEngine(rawCfg.search_engine),
                 kimi_silent: _vBool(rawCfg.kimi_silent, defaults.kimi_silent),
-                kimi_deep_research: _vBool(rawCfg.kimi_deep_research, defaults.kimi_deep_research)
+                kimi_deep_research: _vBool(rawCfg.kimi_deep_research, defaults.kimi_deep_research),
+                glm_deep_research: _vBool(rawCfg.glm_deep_research, defaults.glm_deep_research),
+                game_aliases: _normalizeAliases(rawCfg.game_aliases)
             };
         } catch (err) {
             this.context.log('warn', `洛基之影 配置加载失败，使用默认值: ${err.message}`);
@@ -392,7 +604,7 @@ const TRACK_TOOL = {
     type: 'function',
     function: {
         name: 'loki_shadow_track',
-        description: '【洛基之影 · 游戏状态追踪】仅在用户正在玩某款游戏、且能确定该作品正式名时调用；game_name 必须是游戏名，禁止用哔哩哔哩/Chrome 等应用或平台名。纯看视频/直播/浏览器且无游戏 UI 时不要调用。轻量、不触发搜索。main_quest 只接受 screenshot 与 user_confirmed。',
+        description: '【洛基之影 · 游戏状态追踪】仅在用户正在玩某款游戏、且能确定该作品正式名时调用；每个顶层用户输入或主动触发中，同一截图/同一状态最多成功调用一次。用户明确说出“我在玩/我玩这个 <游戏名>”时，即使没有截图，也要以 source=user_confirmed 轻量同步一次，且只传 game_name 与 source。若本轮已经收到成功结果，不要重复调用；只有取得新截图且状态确实变化时才再次更新。game_name 必须是游戏名，禁止用哔哩哔哩/Chrome 等应用或平台名。纯看视频/直播/浏览器且无游戏 UI 时不要调用。轻量、不触发搜索。main_quest 只接受 screenshot 与 user_confirmed。',
         parameters: {
             type: 'object',
             properties: {
@@ -432,7 +644,7 @@ const TRACK_TOOL = {
                 },
                 companion_note: {
                     type: 'string',
-                    description: '玩家陪玩偏好短备注，如「想自己探索」「只要打法不要剧情」「只聊角色」等，供主对话与 Kimi 检索参考。'
+                    description: '玩家陪玩偏好短备注，如「想自己探索」「只要打法不要剧情」「只聊角色」等，供主对话与联网检索参考。'
                 }
             },
             required: ['game_name', 'source']
@@ -444,7 +656,7 @@ const QUERY_TOOL = {
     type: 'function',
     function: {
         name: 'loki_shadow_query',
-        description: '【洛基之影 · 游戏陪玩】仅在你对当前游戏有明确、具体的问题时调用，例如想知道任务下一步、Boss机制、角色背景、某句台词含义、某段剧情信息。先由主对话模型想清楚自己具体要问什么，再把这个具体问题交给洛基之影检索。不是每轮对话必调；没有明确疑问时继续自然陪聊即可。内部已自动委托给 Kimi 联网 AI 搜索一站式获取答案，速度快、来源整合好。你应当对返回的信息按防剧透偏好做处理后再告诉用户。',
+        description: '【洛基之影 · 游戏陪玩】仅在你对当前游戏有明确、具体的问题时调用，例如想知道任务下一步、Boss机制、角色背景、某句台词含义、某段剧情信息。先由主对话模型想清楚自己具体要问什么，再把这个具体问题交给洛基之影检索。不是每轮对话必调；没有明确疑问时继续自然陪聊即可。内部根据 search_engine 配置一站式委托给 Kimi 或 GLM 联网搜索（来源整合好），并会自动带上当前已记录的主线任务名作为检索上下文（若存在）。你应当对返回的信息按防剧透偏好做处理后再告诉用户。',
         parameters: {
             type: 'object',
             properties: {
