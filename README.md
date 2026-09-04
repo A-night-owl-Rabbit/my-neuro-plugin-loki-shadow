@@ -1,10 +1,17 @@
-# 洛基之影（Shadow of Loki） v3.0.0
+# 洛基之影（Shadow of Loki）
 
-**my-neuro** 生态下的 **live-2d 社区插件**，面向"游戏陪玩 / 游戏攻略辅助"场景：通过窗口检测识别游戏，跨会话记忆任务/Boss/章节/区域等状态，并把所有攻略/剧情类问题一站式委托给 Kimi 联网 AI 搜索（[`kimi-search`](https://github.com/A-night-owl-Rabbit) 同生态插件）作答。
+> [my-neuro(肥牛)](https://github.com/morettt/my-neuro) 社区插件发布仓库 · 当前版本：3.1.0 · 需搭配 kimi-search（或 glm-search）插件
 
-**仓库地址：** [https://github.com/A-night-owl-Rabbit/my-neuro-plugin-loki-shadow](https://github.com/A-night-owl-Rabbit/my-neuro-plugin-loki-shadow)
+**my-neuro** 生态下的 **live-2d 社区插件**，面向"游戏陪玩 / 游戏攻略辅助"场景：通过窗口检测识别游戏，跨会话记忆任务/Boss/章节/区域等状态，并把所有攻略/剧情类问题一站式委托给联网 AI 搜索（v3.1 起可在 `search_engine` 里切换：`kimi`=Kimi 一站式快总结，`glm`=智谱清言 GLM 长文档深度分析）作答。
 
----
+> **太长不看（新手只要读这一段）**：装好本插件 + 装好并配好 `kimi-search` 插件 → 重启桌宠 → 打开你的游戏 → 直接对肥牛说「这个 Boss 怎么打」。她会认出你在玩什么游戏、记住你打到哪了、帮你查攻略还自动防剧透。以下长文都是给进阶玩家的细节。
+
+## 这是什么？（给完全没接触过的小白）
+
+- **插件**：给肥牛加功能的"扩展包"，放进插件文件夹、重启一次就生效
+- 这是一个**游戏陪玩外挂级插件**（外挂指功能，不是作弊）：她会自动发现你正在玩哪个游戏（检测游戏窗口）、记住你的主线任务/Boss/章节进度（跨会话，关机再开也记得）、在你问攻略时替你联网查答案
+- **防剧透是默认行为**：她会按你设定的"剧透接受度"（默认最严格）过滤答案，只告诉你当前进度需要的部分
+- **前提**：本插件自己不联网，查攻略依赖 `kimi-search`（或 `glm-search`）插件，请确保那个插件已装好且 Key 有效
 
 ## v3.0.0 重大更新（检索引擎换骨）
 
@@ -80,7 +87,15 @@
 
 ---
 
-## 安装方式
+## 安装教程
+
+**方式一（推荐）：WebUI 插件广场一键安装**
+
+1. 打开 my-neuro 的 WebUI 控制面板 → 「广场」→ 插件广场
+2. 先确保 `kimi-search`（或 `glm-search`）插件已安装并配置好 API Key
+3. 找到本插件，点击安装（已装过则点更新），重启 Live2D 桌宠
+
+**方式二：手动安装**
 
 将整个插件目录放到 my-neuro 的社区插件路径下：
 
@@ -91,6 +106,14 @@ live-2d/plugins/community/loki-shadow/
 目录内应包含 `index.js`、`metadata.json`、`plugin_config.json` 及其他模块文件。无需额外执行 `npm install`。
 
 确认 `kimi-search` 插件已启用且配置了有效的 Kimi API Key，然后在 my-neuro 中启用本插件并重启或热重载即可。
+
+## 使用教程（照着做就行）
+
+1. 正常打开你的游戏（支持窗口标题识别的游戏：鸣潮、绝区零、原神、星穹铁道、黑神话：悟空、艾尔登法环、只狼等数十款）
+2. 对肥牛说：「我在玩 xx，现在卡在 xx 任务」或直接问「这个 Boss 怎么打」
+3. 她会自动记录你的进度（主线/Boss/章节/区域），下次再问会接着上次的进度聊
+4. 想被剧透？对她说「可以给我剧透」；想收紧？说「别剧透，只提示下一步」
+5. 不想让她识别游戏状态？在 WebUI 插件管理里停用即可，游戏进度记忆保留在本地 `.runtime/` 里
 
 ---
 
@@ -104,6 +127,7 @@ v3.0 配置非常简洁，仅 5 项可配，全部为非敏感本地行为开关
 | `session_context_ttl_ms`         | int   | `60000`       | 内存游戏状态有效期（毫秒）。超过该时间未调用 track 则清空内存槽位；持久化文件仍保留。可增大以降低"换场景丢状态"感                                                                                          |
 | `enable_cross_session_memory`    | bool  | `true`        | 是否启用跨会话记忆                                                                                                                                                |
 | `persist_dir`                    | string | `""`          | 跨会话记忆 `.loki-shadow-persist.json` 存放目录。留空使用插件目录下的 `.runtime/`。Windows 路径需转义反斜杠。**该文件包含玩家进度，不要提交到公共仓库**                                                  |
+| `search_engine`                  | string | `kimi`      | v3.1 新增：联网检索引擎。`kimi`=Kimi 一站式快总结（需 kimi-search 插件）；`glm`=智谱清言 GLM 长文档深度分析（需 glm-search 插件）                                                |
 | `kimi_silent`                    | bool  | `true`        | 调用 `kimi_web_search` 时是否传 `silent=true`（屏蔽 Kimi 搜索/思考过程，只返回最终答案）                                                                                          |
 | `kimi_deep_research`             | bool  | `false`       | 是否默认启用 Kimi 探索版（更慢但更全面）。普通查询保持 `false`；主对话模型在需要深度调研时可绕过此默认直接调用 `kimi_web_search`                                                                          |
 
@@ -202,6 +226,25 @@ reason: kimi_unavailable | …
 ```
 
 ---
+
+## 常见问题（FAQ）
+
+- **问攻略一直失败/没答案？** 九成是 `kimi-search`（或 `glm-search`）插件没装好或 Key 失效——本插件自己不联网。检查返回里的 `reason: kimi_unavailable` 字样。
+- **她认不出我在玩的游戏？** 窗口检测靠游戏标题关键词匹配，冷门独立游戏可能不在列表里；直接对她说「我在玩 xx」手动告知即可。
+- **换了个场景她就忘了进度？** 内存状态有效期默认 60 秒（`session_context_ttl_ms`），超时靠跨会话记忆恢复；确认 `enable_cross_session_memory` 开着。
+- **会被剧透吗？** 默认最严格防剧透（`strict`）。想放宽对她说一声，或让她把 `spoiler_comfort` 设为 `mild`/`full`。
+- **在玩的游戏她查不到攻略？** Kimi/GLM 搜索对大作覆盖最好；超冷门作品可切换 `search_engine` 试试另一个引擎。
+
+## 故障排查
+
+1. 日志（`logger.js` 结构化输出）搜 `loki` 或 `kimi_web_search`，可看到窗口检测、委托查询的每步记录
+2. 窗口检测不工作：确认是 Windows 环境且 PowerShell 可用
+3. 还有问题请到 [本仓库 Issues](https://github.com/A-night-owl-Rabbit/my-neuro-plugin-loki-shadow/issues) 提问
+
+## 更新与卸载
+
+- **更新**：插件广场点更新，或手动覆盖 `community/loki-shadow/` 后重启；`.runtime/` 里的游戏进度记忆不受影响
+- **卸载**：WebUI「插件管理」停用并删除 `live-2d/plugins/community/loki-shadow/` 文件夹；游戏进度数据在 `.runtime/` 里，随文件夹一起删除
 
 ## 版本记录
 
